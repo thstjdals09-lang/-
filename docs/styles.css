@@ -66,6 +66,19 @@ button:disabled{opacity:.55;cursor:not-allowed}
 .resultLinks a{text-decoration:none}
 .disabledLink{border-style:dashed;filter:saturate(.55)}
 .smallCopy{font-size:11px;line-height:1.5}
+.publishWarning{display:grid;gap:5px;margin-bottom:12px;padding:15px;border:1px solid #7a5630;border-radius:12px;background:#21170d;color:#f5c27c}
+.publishWarning span{color:#c7a273;font-size:12px;line-height:1.5}
+.playableNotice{display:grid;gap:5px;margin-bottom:12px;padding:15px;border:1px solid #286744;border-radius:12px;background:#0d2116;color:#7be4a5}
+.playableNotice span{color:#8ebca0;font-size:12px;line-height:1.5}
+.offlineBadge{border-color:#764047;color:#ff9aa0;background:#251417}
+.liveBadge{border-color:#277a4a;color:#74e6a0;background:#0d2115}
+.expectedUrls{display:grid;gap:5px;margin-top:14px;padding:12px;border:1px dashed #2b3949;border-radius:10px;background:#080d13}
+.expectedUrls small{margin-top:4px;color:#708195}
+.expectedUrls code{overflow-wrap:anywhere;color:#9aa9bb;font-size:11px}
+.headerActions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.gameModal{position:fixed;inset:0;z-index:1000;display:grid;grid-template-rows:auto 1fr;padding:14px;background:rgba(3,6,10,.94);backdrop-filter:blur(10px)}
+.gameModalBar{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:0 0 12px}
+.gameModal iframe{width:100%;height:100%;border:1px solid #2a394d;border-radius:14px;background:#070b12}
 .checkLabel{display:flex;grid-template-columns:20px 1fr;align-items:center;gap:8px;padding:10px;border:1px solid #223142;border-radius:10px;background:#0a1017}
 .checkLabel input{width:16px;height:16px;padding:0}
 @media(max-width:1100px){.ideaGrid{grid-template-columns:repeat(2,1fr)}.employeeGrid,.marketGrid{grid-template-columns:1fr}}

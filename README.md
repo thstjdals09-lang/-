@@ -4,9 +4,11 @@
 
 Open the current browser preview from any PC or phone:
 
-https://raw.githack.com/thstjdals09-lang/-/main/docs/index.html
+https://thstjdals09-lang.github.io/-/
 
 The preview is built from `docs/index.html` in this repository and is updated as development continues.
+
+The preview generates a real standalone HTML5 microgame for every completed line. It can be played in the browser or downloaded as `index.html`. GitHub repository and Pages controls remain disabled until the server-side publisher returns a successful `published` result; predicted addresses are shown only as non-clickable text and must not be treated as deployed games.
 
 AI Factory is a local-first multi-agent software production system.
 

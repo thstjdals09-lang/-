@@ -21,6 +21,7 @@ Legend: `[x]` implemented, `[-]` partially implemented, `[ ]` not implemented.
 - [x] Google login entry screen (preview session; real OAuth belongs to P1/P2)
 - [x] CEO dashboard
 - [x] Topic intake
+- [x] Topic change with completed-result preservation and paused-line resume
 - [x] Deterministic simulation of ten game ideas
 - [x] Automatic scoring and shortlist
 - [x] Idea Backlog and “build this idea” action
@@ -37,8 +38,11 @@ Legend: `[x]` implemented, `[-]` partially implemented, `[ ]` not implemented.
 - [x] Autonomous stage-by-stage Autopilot with pause/resume and instant-complete controls
 - [x] Dedicated CEO Review queue with build/QA/approval/revision state
 - [x] Left-side completed-game results view with repository and GitHub Pages addresses
-- [x] Server-side game-named repository creation/update, release commit, main-ref push, and GitHub Pages activation
-- [-] Preview completion queues a secure backend publish job; authenticated browser-to-backend wiring remains P1 work
+- [x] Real standalone HTML5 microgame generation, in-browser play, smoke validation, and download
+- [x] Server-side game-named repository creation/update, release commit, main-ref push, and GitHub Pages activation code
+- [ ] Publisher backend hosting and `AI_FACTORY_GITHUB_TOKEN` configuration
+- [ ] Authenticated browser-to-backend completion/publish wiring
+- [x] Unpublished preview records do not expose clickable GitHub/Pages links
 
 ## P1 — backend data and account structure
 

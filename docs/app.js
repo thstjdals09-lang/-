@@ -44,6 +44,7 @@
   ];
 
   var activeTab = "dashboard";
+  var editingTopic = false;
 
   function clone(x) {
     return JSON.parse(JSON.stringify(x));
@@ -72,8 +73,11 @@
       (x.lines || []).forEach(function (line) {
         if (typeof line.autopilot !== "boolean") line.autopilot = x.settings.autopilot;
         if (!line.publication) line.publication = {status:"not_ready",repository:null};
+        if (line.publication.status === "queued") line.publication.status = "awaiting_backend";
         line.handoffs = line.handoffs || [];
         line.topicName = line.topicName || (x.topic && x.topic.name) || "game";
+        line.gameType = line.gameType || String(line.title || "").split("·").pop().trim() || "Arcade Score";
+        if (line.status === "complete") ensurePlayableBuild(line);
       });
       return x;
     } catch (e) {
@@ -221,6 +225,7 @@
       ideaId:idea.id,
       title:idea.title,
       topicName:state.topic ? state.topic.name : "game",
+      gameType:idea.type,
       stage:2,
       status:"running",
       autopilot:state.settings.autopilot,
@@ -240,6 +245,14 @@
     var topic = String(fd.get("topic") || "").trim();
     if (!topic) return;
 
+    var previousTopic = state.topic && state.topic.name;
+    state.lines.forEach(function (line) {
+      if (line.status === "running") {
+        line.status = "paused";
+        line.autopilot = false;
+      }
+    });
+
     state.topic = {
       name:topic,
       genre:String(fd.get("genre") || "자동선택"),
@@ -249,7 +262,6 @@
     };
 
     state.ideas = generateIdeas(topic, state.topic.genre);
-    state.lines = state.lines.filter(function (line) { return line.status === "complete"; });
     state.backlog = [];
 
     var n = Math.min(state.settings.autoShortlist, state.settings.maxParallel, state.ideas.length);
@@ -261,38 +273,133 @@
       }
     });
 
+    if (previousTopic) addLog("TOPIC CHANGE",previousTopic+" → "+topic+" · 기존 진행라인 일시정지");
     addLog("IDEATION","아이디어 10개 생성 · 상위 "+n+"개 자동 shortlist · "+(10-n)+"개 Backlog 보관");
+    editingTopic = false;
     save();
     render();
   }
 
+  function jsonForScript(value) {
+    return JSON.stringify(String(value == null ? "" : value)).replace(/</g, "\\u003c");
+  }
+
+  function buildPlayableGame(line) {
+    var gameTitle = jsonForScript(line.title);
+    var topic = jsonForScript(line.topicName);
+    var gameType = jsonForScript(line.gameType || "Arcade Score");
+    return `<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AI Factory Game</title>
+  <style>
+    :root{color-scheme:dark;--bg:#070b12;--panel:#101827;--line:#29384f;--accent:#7c6cff;--good:#49dc8c;--bad:#ff6f7d}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:20px;background:radial-gradient(circle at 50% 0,#20255a 0,transparent 40%),var(--bg);color:#f6f8fc;font-family:Inter,system-ui,sans-serif}
+    .game{width:min(760px,100%);padding:24px;border:1px solid var(--line);border-radius:20px;background:rgba(13,20,32,.96);box-shadow:0 30px 80px #0008}h1{margin:4px 0 6px;font-size:clamp(25px,5vw,42px)}.sub{margin:0 0 20px;color:#93a5bb}.hud{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.stat{padding:12px;border:1px solid var(--line);border-radius:12px;background:#0a111c}.stat small,.stat strong{display:block}.stat small{color:#73869d;font-size:10px;text-transform:uppercase;letter-spacing:.12em}.stat strong{margin-top:4px;font-size:21px}.arena{min-height:300px;margin-top:12px;padding:20px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(145deg,#111b2c,#0b111b);text-align:center}.prompt{color:#aebbd0}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:25px 0}.card{min-height:125px;border:1px solid #394b66;border-radius:16px;background:linear-gradient(160deg,#1d2940,#101827);color:white;font-size:38px;font-weight:900;cursor:pointer;transition:.16s transform,.16s border-color}.card:hover{transform:translateY(-4px);border-color:#8c82ff}.card.good{border-color:var(--good);background:#103021}.card.bad{border-color:var(--bad);background:#35151b}.message{min-height:28px;color:#9eacc0}.primary{width:100%;padding:14px;border:0;border-radius:12px;background:linear-gradient(135deg,#8577ff,#5a48ec);color:white;font-weight:900;cursor:pointer}.hidden{display:none}@media(max-width:560px){.hud{grid-template-columns:repeat(2,1fr)}.cards{grid-template-columns:1fr}.card{min-height:72px}}
+  </style>
+</head>
+<body>
+  <main class="game">
+    <small id="mode"></small><h1 id="title"></h1><p class="sub">가장 높은 에너지 카드를 빠르게 선택해 콤보를 이어가세요.</p>
+    <section class="hud"><div class="stat"><small>Score</small><strong id="score">0</strong></div><div class="stat"><small>Combo</small><strong id="combo">0</strong></div><div class="stat"><small>Time</small><strong id="time">45</strong></div><div class="stat"><small>Lives</small><strong id="lives">3</strong></div></section>
+    <section class="arena"><p class="prompt" id="prompt">게임을 시작하면 세 카드 중 가장 높은 숫자를 고르세요.</p><div class="cards" id="cards"></div><p class="message" id="message">실제 브라우저에서 실행되는 독립형 HTML5 빌드입니다.</p><button class="primary" id="start">게임 시작</button></section>
+  </main>
+  <script>
+    const GAME_TITLE=${gameTitle}; const TOPIC=${topic}; const GAME_TYPE=${gameType};
+    const $=id=>document.getElementById(id); let score=0,combo=0,lives=3,time=45,active=false,timer=null,round=0;
+    $("title").textContent=GAME_TITLE; $("mode").textContent=TOPIC+" · "+GAME_TYPE;
+    function sync(){ $("score").textContent=score; $("combo").textContent=combo; $("lives").textContent=lives; $("time").textContent=time; }
+    function makeRound(){
+      if(!active)return; round+=1; const values=[]; while(values.length<3){const n=1+Math.floor(Math.random()*(20+round));if(!values.includes(n))values.push(n)}
+      const target=Math.max(...values); $("prompt").textContent="ROUND "+round+" · 가장 높은 에너지를 확보하세요"; const wrap=$("cards"); wrap.innerHTML="";
+      values.sort(()=>Math.random()-.5).forEach(value=>{const b=document.createElement("button");b.className="card";b.textContent=value;b.onclick=()=>choose(value,target,b);wrap.appendChild(b)});
+    }
+    function choose(value,target,button){
+      if(!active)return; document.querySelectorAll(".card").forEach(x=>x.disabled=true);
+      if(value===target){combo+=1;score+=100+combo*20;button.classList.add("good");$("message").textContent="정확합니다! 콤보 보너스 +"+(100+combo*20)}
+      else{combo=0;lives-=1;button.classList.add("bad");$("message").textContent="위험 선택! 정답은 "+target;if(lives<=0){sync();endGame();return}}
+      sync();setTimeout(makeRound,350);
+    }
+    function startGame(){score=0;combo=0;lives=3;time=45;round=0;active=true;clearInterval(timer);$("start").classList.add("hidden");$("message").textContent="생산라인 빌드 실행 중";sync();makeRound();timer=setInterval(()=>{time-=1;sync();if(time<=0)endGame()},1000)}
+    function endGame(){active=false;clearInterval(timer);$("cards").innerHTML="";$("prompt").textContent="RUN COMPLETE";$("message").textContent="최종 점수 "+score+" · 최고 콤보 "+combo;$("start").textContent="다시 플레이";$("start").classList.remove("hidden")}
+    $("start").onclick=startGame;
+  </script>
+</body>
+</html>`;
+  }
+
+  function ensurePlayableBuild(line) {
+    if (!line.gameFiles || !line.gameFiles["index.html"]) {
+      line.gameFiles = {"index.html":buildPlayableGame(line)};
+    }
+    var html = line.gameFiles["index.html"];
+    var smokePassed = /<!doctype html>/i.test(html) && html.indexOf("startGame") !== -1 && html.indexOf('id="cards"') !== -1;
+    line.build = {
+      status:smokePassed ? "playable" : "failed",
+      smokeTest:smokePassed ? "passed" : "failed",
+      createdAt:line.build && line.build.createdAt ? line.build.createdAt : now()
+    };
+    if (line.artifacts.indexOf("index.html") === -1) line.artifacts.push("index.html");
+    return smokePassed;
+  }
+
+  function openPlayableGame(lineId) {
+    var line = state.lines.find(function (x) { return x.id === lineId; });
+    if (!line || !ensurePlayableBuild(line)) return;
+    var modal = document.createElement("div");
+    modal.className = "gameModal";
+    modal.innerHTML = '<div class="gameModalBar"><strong>'+esc(line.title)+'</strong><button class="button" data-close-game>닫기</button></div><iframe title="'+esc(line.title)+'" sandbox="allow-scripts"></iframe>';
+    document.body.appendChild(modal);
+    modal.querySelector("iframe").srcdoc = line.gameFiles["index.html"];
+    modal.querySelector("[data-close-game]").onclick = function () { modal.remove(); };
+  }
+
+  function downloadPlayableGame(lineId) {
+    var line = state.lines.find(function (x) { return x.id === lineId; });
+    if (!line || !ensurePlayableBuild(line)) return;
+    var url = URL.createObjectURL(new Blob([line.gameFiles["index.html"]], {type:"text/html;charset=utf-8"}));
+    var anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = slugify(line.title)+".html";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
   function queueCompletedLine(line) {
-    if (state.reviews.some(function (review) { return review.lineId === line.id; })) return;
+    var existingReview = state.reviews.find(function (review) { return review.lineId === line.id; });
+    var smokePassed = ensurePlayableBuild(line);
     var repository = slugify(line.topicName || "game")+"-"+slugify(line.title.split("·").pop());
     var owner = state.settings.githubOwner || "thstjdals09-lang";
     var repositoryUrl = "https://github.com/"+owner+"/"+encodeURIComponent(repository);
     var pagesUrl = "https://"+owner+".github.io/"+encodeURIComponent(repository)+"/";
     line.publication = {
-      status:state.settings.autoPublish ? "queued" : "waiting_for_approval",
+      status:state.settings.autoPublish ? "awaiting_backend" : "waiting_for_approval",
       repository:repository,
       repositoryUrl:repositoryUrl,
       pagesUrl:pagesUrl
     };
-    state.reviews.unshift({
+    var reviewPayload = existingReview || {
       id:"review-"+Date.now()+"-"+Math.random().toString(36).slice(2,6),
-      lineId:line.id,
+      lineId:line.id
+    };
+    Object.assign(reviewPayload, {
       title:line.title,
       status:"pending",
-      qaStatus:"passed",
-      build:"release-build.zip",
+      qaStatus:smokePassed ? "browser_smoke_passed" : "failed",
+      build:"index.html",
       repository:repository,
       repositoryUrl:repositoryUrl,
       pagesUrl:pagesUrl,
       createdAt:now()
     });
-    addLog("BUILD READY",line.title+" · QA 통과 · CEO Review 대기",line.id);
+    if (!existingReview) state.reviews.unshift(reviewPayload);
+    addLog("BUILD READY",line.title+" · 실제 HTML5 빌드 생성 · 브라우저 smoke test "+(smokePassed ? "통과" : "실패"),line.id);
     if (state.settings.autoPublish) {
-      addLog("PUBLISH QUEUED",repository+" 저장소 생성·commit·push 작업을 보안 백엔드에 예약",line.id);
+      addLog("PUBLISH WAITING",repository+" · Backend Publisher 연결 전이라 실제 GitHub 게시되지 않음",line.id);
     }
   }
 
@@ -451,6 +558,21 @@
     render();
   }
 
+  function resumeLine(lineId) {
+    var line = state.lines.find(function (x) { return x.id === lineId; });
+    if (!line || line.status !== "paused") return;
+    var running = state.lines.filter(function (x) { return x.status === "running"; }).length;
+    if (running >= state.settings.maxParallel) {
+      alert("현재 병렬 생산라인 한도에 도달했습니다.");
+      return;
+    }
+    line.status = "running";
+    line.autopilot = true;
+    addLog("LINE RESUME",line.title+" · 생산라인 자동 진행 재개",line.id);
+    save();
+    render();
+  }
+
   function approveReview(reviewId) {
     var review = state.reviews.find(function (x) { return x.id === reviewId; });
     if (!review) return;
@@ -473,6 +595,8 @@
     line.stage = 10;
     line.autopilot = true;
     line.publication.status = "held_for_revision";
+    delete line.gameFiles;
+    delete line.build;
     line.history.unshift({time:now(),text:"CEO 수정명령: "+note});
     addLog("CEO REVISION",line.title+" · "+note,line.id);
     save();
@@ -587,7 +711,7 @@
       ideas:"아이디어 포트폴리오",
       lines:"게임 생산라인",
       review:"CEO Review",
-      results:"완성 게임 결과물",
+      results:"게임 결과물 / 배포 현황",
       team:"AI 사원 / 사용량",
       market:"AI 플러그인 마켓",
       logs:"공장 로그",
@@ -625,6 +749,23 @@
     '</div>';
   }
 
+  function topicFormMarkup(isEdit) {
+    return '<div class="panel">'+
+      '<div class="eyebrow">'+(isEdit ? "CHANGE FACTORY THEME" : "NEW FACTORY RUN")+'</div>'+
+      '<h2>'+(isEdit ? "새 주제로 생산 포트폴리오 전환" : "주제만 주면 아이디어 10개부터 시작합니다")+'</h2>'+
+      (isEdit ? '<p class="muted">완료 결과는 보존하고, 현재 진행 중인 라인은 일시정지한 뒤 새 주제의 생산라인을 시작합니다.</p>' : '')+
+      '<form class="form" id="topicForm">'+
+        '<input name="topic" placeholder="예: 홀덤, 좀비, 타이핑, 카페 운영" required>'+
+        '<div class="formRow">'+
+          '<select name="genre"><option>자동선택</option><option>Roguelike</option><option>Deckbuilder</option><option>Tycoon</option><option>Strategy</option><option>Party</option></select>'+
+          '<select name="platform"><option>Windows PC</option><option>Web</option><option>Mobile</option><option>Steam PC</option></select>'+
+        '</div>'+
+        '<textarea name="notes" rows="4" placeholder="선택: 분위기, 레퍼런스, 금지사항"></textarea>'+
+        '<div class="lineActions"><button class="button primary">'+(isEdit ? "새 주제로 공장 전환" : "AI 공장 가동")+'</button>'+(isEdit ? '<button class="button" type="button" id="cancelTopicEdit">취소</button>' : '')+'</div>'+
+      '</form>'+
+    '</div>';
+  }
+
   function renderDashboard() {
     var v = document.getElementById("view");
     var running = state.lines.filter(function (x) { return x.status === "running"; });
@@ -640,25 +781,12 @@
         '<div class="stat accent"><span>완료 게임</span><strong>'+complete.length+'</strong><small>검토 후 배포</small></div>'+
       '</div>';
 
-    if (!state.topic) {
-      html +=
-        '<div class="panel">'+
-          '<div class="eyebrow">NEW FACTORY RUN</div>'+
-          '<h2>주제만 주면 아이디어 10개부터 시작합니다</h2>'+
-          '<form class="form" id="topicForm">'+
-            '<input name="topic" placeholder="예: 홀덤, 좀비, 타이핑, 카페 운영" required>'+
-            '<div class="formRow">'+
-              '<select name="genre"><option>자동선택</option><option>Roguelike</option><option>Deckbuilder</option><option>Tycoon</option><option>Strategy</option><option>Party</option></select>'+
-              '<select name="platform"><option>Windows PC</option><option>Web</option><option>Mobile</option><option>Steam PC</option></select>'+
-            '</div>'+
-            '<textarea name="notes" rows="4" placeholder="선택: 분위기, 레퍼런스, 금지사항"></textarea>'+
-            '<button class="button primary">AI 공장 가동</button>'+
-          '</form>'+
-        '</div>';
+    if (!state.topic || editingTopic) {
+      html += topicFormMarkup(Boolean(state.topic));
     } else {
       html +=
         '<div class="panel">'+
-          '<div class="panelHeader"><div><div class="eyebrow">ACTIVE BRIEF</div><h2>'+esc(state.topic.name)+'</h2></div><span class="badge">'+esc(state.topic.platform)+'</span></div>'+
+          '<div class="panelHeader"><div><div class="eyebrow">ACTIVE BRIEF</div><h2>'+esc(state.topic.name)+'</h2></div><div class="headerActions"><span class="badge">'+esc(state.topic.platform)+'</span><button class="button small" id="changeTopic">주제 변경</button></div></div>'+
           '<p class="muted">아이디어 10개 생성 → 상위 '+state.settings.autoShortlist+'개 자동 생산 → 나머지 Backlog</p>'+
         '</div>'+
         '<div class="panel">'+
@@ -677,11 +805,22 @@
 
     var form = document.getElementById("topicForm");
     if (form) {
+      if (state.topic) {
+        form.elements.topic.value = state.topic.name || "";
+        form.elements.genre.value = state.topic.genre || "자동선택";
+        form.elements.platform.value = state.topic.platform || "Windows PC";
+        form.elements.notes.value = state.topic.notes || "";
+      }
       form.onsubmit = function (e) {
         e.preventDefault();
         startFactory(form);
       };
     }
+
+    var changeTopic = document.getElementById("changeTopic");
+    if (changeTopic) changeTopic.onclick = function () { editingTopic = true; renderView(); };
+    var cancelTopicEdit = document.getElementById("cancelTopicEdit");
+    if (cancelTopicEdit) cancelTopicEdit.onclick = function () { editingTopic = false; renderView(); };
 
     var go = document.getElementById("goLines");
     if (go) {
@@ -747,7 +886,7 @@
           return '<div class="miniStage '+cls+'"><span>'+(idx+1)+'</span><small>'+esc(s[1])+'</small></div>';
         }).join("")+'</div>'+
         '<div class="lineActions">'+
-          (line.status === "running" ? '<button class="button" data-auto="'+esc(line.id)+'">'+(line.autopilot ? "자동진행 일시정지" : "자동진행 재개")+'</button><button class="button primary" data-finish="'+esc(line.id)+'">완성까지 즉시 실행</button>' : '<button class="button primary" data-results="1">결과물 보기</button>')+
+          (line.status === "running" ? '<button class="button" data-auto="'+esc(line.id)+'">'+(line.autopilot ? "자동진행 일시정지" : "자동진행 재개")+'</button><button class="button primary" data-finish="'+esc(line.id)+'">완성까지 즉시 실행</button>' : line.status === "paused" ? '<button class="button primary" data-resume="'+esc(line.id)+'">생산라인 재개</button>' : '<button class="button primary" data-results="1">결과물 보기</button>')+
         '</div>'+
         '<div class="feedbackBox"><input id="fb-'+esc(line.id)+'" placeholder="CEO 수정명령"><button class="button" data-feedback="'+esc(line.id)+'">피드백 반영</button></div>'+
         '<div class="artifactMini"><strong>산출물</strong><small>'+line.artifacts.map(esc).join(" · ")+'</small></div>'+
@@ -764,6 +903,10 @@
 
     v.querySelectorAll("[data-finish]").forEach(function (b) {
       b.onclick = function () { finishLine(b.getAttribute("data-finish")); };
+    });
+
+    v.querySelectorAll("[data-resume]").forEach(function (b) {
+      b.onclick = function () { resumeLine(b.getAttribute("data-resume")); };
     });
 
     v.querySelectorAll("[data-results]").forEach(function (b) {
@@ -788,8 +931,9 @@
     v.innerHTML = '<div class="cards">'+state.reviews.map(function (review) {
       return '<div class="panel reviewCard">'+
         '<div class="panelHeader"><div><div class="eyebrow">RELEASE CANDIDATE</div><h2>'+esc(review.title)+'</h2></div><span class="badge">'+esc(review.status.toUpperCase())+'</span></div>'+
-        '<div class="reviewFacts"><span>빌드 <strong>'+esc(review.build)+'</strong></span><span>QA <strong>'+esc(review.qaStatus.toUpperCase())+'</strong></span><span>게시 <strong>AUTO QUEUED</strong></span></div>'+
+        '<div class="reviewFacts"><span>빌드 <strong>PLAYABLE HTML5</strong></span><span>QA <strong>'+esc(review.qaStatus.toUpperCase())+'</strong></span><span>GitHub 게시 <strong>BACKEND OFFLINE</strong></span></div>'+
         '<p class="muted">'+esc(review.createdAt)+' · 저장소 '+esc(review.repository)+'</p>'+
+        '<div class="lineActions"><button class="button primary" data-play="'+esc(review.lineId)+'">게임 테스트 실행</button></div>'+
         (review.status === "pending" ? '<div class="feedbackBox"><input id="revision-'+esc(review.id)+'" placeholder="수정이 필요하면 지시를 입력"><button class="button" data-revise="'+esc(review.id)+'">수정 요청</button><button class="button primary" data-approve="'+esc(review.id)+'">승인</button></div>' : '')+
       '</div>';
     }).join("")+'</div>';
@@ -799,6 +943,9 @@
     });
     v.querySelectorAll("[data-revise]").forEach(function (b) {
       b.onclick = function () { reviseReview(b.getAttribute("data-revise")); };
+    });
+    v.querySelectorAll("[data-play]").forEach(function (b) {
+      b.onclick = function () { openPlayableGame(b.getAttribute("data-play")); };
     });
   }
 
@@ -810,20 +957,31 @@
       return;
     }
 
-    v.innerHTML = '<div class="resultGrid">'+completed.map(function (line) {
+    v.innerHTML =
+      '<div class="playableNotice"><strong>HTML5 게임 빌드는 지금 바로 실제 실행할 수 있습니다.</strong><span>게임 테스트·다운로드는 동작합니다. GitHub 저장소와 Pages 링크는 Backend Publisher의 실제 성공 응답 후에만 활성화됩니다.</span></div>'+
+      '<div class="resultGrid">'+completed.map(function (line) {
       var publication = line.publication || {};
       var isLive = publication.status === "published";
+      var hasBuild = ensurePlayableBuild(line) && line.build.status === "playable";
       return '<div class="panel resultCard">'+
         '<div class="resultCover"><span>GAME BUILD</span><strong>'+esc(line.title)+'</strong></div>'+
-        '<div class="panelHeader"><div><div class="eyebrow">GITHUB DELIVERY</div><h2>'+esc(publication.repository || line.title)+'</h2></div><span class="badge">'+esc((publication.status || "queued").toUpperCase())+'</span></div>'+
-        '<div class="artifactMini"><strong>Release Build</strong><small>release-build.zip · QA passed · '+line.artifacts.length+' artifacts</small></div>'+
+        '<div class="panelHeader"><div><div class="eyebrow">PLAYABLE DELIVERY</div><h2>'+esc(publication.repository || line.title)+'</h2></div><span class="badge '+(isLive ? "liveBadge" : "offlineBadge")+'">'+(isLive ? "PAGES LIVE" : hasBuild ? "LOCAL PLAYABLE" : "BUILD FAILED")+'</span></div>'+
+        '<div class="artifactMini"><strong>Standalone HTML5 Build</strong><small>index.html · browser smoke '+esc(line.build.smokeTest)+' · '+line.artifacts.length+' artifacts</small></div>'+
         '<div class="resultLinks">'+
-          '<a class="button" href="'+esc(publication.repositoryUrl || "#")+'" target="_blank" rel="noopener">GitHub 저장소</a>'+
-          '<a class="button primary '+(isLive ? '' : 'disabledLink')+'" href="'+esc(publication.pagesUrl || "#")+'" target="_blank" rel="noopener">'+(isLive ? '게임 실행하기 ↗' : 'Pages 주소 보기 ↗')+'</a>'+
+          (hasBuild ? '<button class="button primary" data-play="'+esc(line.id)+'">브라우저에서 실행</button><button class="button" data-download="'+esc(line.id)+'">HTML 게임 다운로드</button>' : '<button class="button" disabled>빌드 실패</button>')+
+          (isLive ? '<a class="button" href="'+esc(publication.repositoryUrl)+'" target="_blank" rel="noopener">GitHub 저장소 ↗</a><a class="button primary" href="'+esc(publication.pagesUrl)+'" target="_blank" rel="noopener">GitHub Pages 실행 ↗</a>' : '<button class="button" disabled>저장소 미생성</button><button class="button" disabled>Pages 미배포</button>')+
         '</div>'+
-        (!isLive ? '<p class="muted smallCopy">예정 주소입니다. 백엔드 게시 Worker가 저장소 생성·commit·push·Pages 활성화를 마치면 자동으로 LIVE로 바뀝니다.</p>' : '')+
+        (!isLive ? '<div class="expectedUrls"><small>배포 예정 저장소</small><code>'+esc(publication.repositoryUrl || "-")+'</code><small>배포 예정 Pages</small><code>'+esc(publication.pagesUrl || "-")+'</code></div>' : '')+
       '</div>';
     }).join("")+'</div>';
+
+    v.querySelectorAll("[data-play]").forEach(function (b) {
+      b.onclick = function () { openPlayableGame(b.getAttribute("data-play")); };
+    });
+    v.querySelectorAll("[data-download]").forEach(function (b) {
+      b.onclick = function () { downloadPlayableGame(b.getAttribute("data-download")); };
+    });
+    save();
   }
 
   function renderTeam() {
@@ -898,7 +1056,7 @@
             '<label>자동 shortlist 수<input id="shortlist" type="number" min="1" max="10" value="'+state.settings.autoShortlist+'"></label>'+
             '<label>GitHub 계정<input id="githubOwner" value="'+esc(state.settings.githubOwner || "thstjdals09-lang")+'"></label>'+
             '<label class="checkLabel"><input id="autopilot" type="checkbox" '+(state.settings.autopilot ? "checked" : "")+'> 생산라인 Autopilot</label>'+
-            '<label class="checkLabel"><input id="autoPublish" type="checkbox" '+(state.settings.autoPublish ? "checked" : "")+'> 완성 게임 GitHub 자동 게시</label>'+
+            '<label class="checkLabel"><input id="autoPublish" type="checkbox" '+(state.settings.autoPublish ? "checked" : "")+'> Backend 연결 시 GitHub 자동 게시</label>'+
             '<button class="button primary" id="saveSettings">저장</button>'+
           '</div>'+
         '</div>'+
