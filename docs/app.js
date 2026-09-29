@@ -1,7 +1,8 @@
 (function () {
   "use strict";
 
-  var STORAGE_KEY = "ai-factory-studio-v1";
+  var STORAGE_KEY = "ai-factory-studio-v3";
+  var AUTOMATION_INTERVAL_MS = 1600;
 
   var STAGES = [
     ["brief","Brief / Theme Intake","주제·플랫폼·제약조건 정리"],
@@ -55,16 +56,26 @@
       ideas:[],
       lines:[],
       backlog:[],
+      reviews:[],
       logs:[],
       topic:null,
-      settings:{policy:"cheapest_viable",maxParallel:3,autoShortlist:3,quotaGuard:true}
+      settings:{policy:"cheapest_viable",maxParallel:3,autoShortlist:3,quotaGuard:true,autopilot:true,autoPublish:true,githubOwner:"thstjdals09-lang"}
     };
   }
 
   function load() {
     try {
       var x = JSON.parse(localStorage.getItem(STORAGE_KEY));
-      return x || defaultState();
+      if (!x) return defaultState();
+      x.reviews = x.reviews || [];
+      x.settings = Object.assign(defaultState().settings, x.settings || {});
+      (x.lines || []).forEach(function (line) {
+        if (typeof line.autopilot !== "boolean") line.autopilot = x.settings.autopilot;
+        if (!line.publication) line.publication = {status:"not_ready",repository:null};
+        line.handoffs = line.handoffs || [];
+        line.topicName = line.topicName || (x.topic && x.topic.name) || "game";
+      });
+      return x;
     } catch (e) {
       return defaultState();
     }
@@ -85,6 +96,16 @@
 
   function now() {
     return new Date().toLocaleString("ko-KR");
+  }
+
+  function slugify(value) {
+    var slug = String(value || "game")
+      .toLowerCase()
+      .normalize("NFC")
+      .replace(/[^a-z0-9가-힣]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48);
+    return slug || "ai-factory-game";
   }
 
   function addLog(type, text, lineId) {
@@ -123,7 +144,7 @@
     var candidates = state.employees.filter(isUsable);
     if (!candidates.length) return null;
 
-    return candidates.map(function (e) {
+    var ranked = candidates.map(function (e) {
       var key = roleSkillKey(role);
       var quality = e.skills[key] || 50;
       var free = costScore(e);
@@ -136,15 +157,29 @@
         score = quality * .42 + free * .43 + e.skills.reliability * .15;
       }
       return {employee:e,score:score};
-    }).sort(function (a,b) { return b.score - a.score; })[0];
+    }).sort(function (a,b) { return b.score - a.score; });
+
+    var blocked = state.employees
+      .filter(function (e) { return !isUsable(e) && e.quota.unit !== "unlimited"; })
+      .sort(function (a,b) {
+        var key = roleSkillKey(role);
+        return (b.skills[key] || 0) - (a.skills[key] || 0);
+      })[0];
+
+    ranked[0].failoverFrom = blocked || null;
+    return ranked[0];
   }
 
-  function consume(employee, weight) {
+  function consume(employee, weight, lineId) {
     if (!employee) return;
     var q = employee.quota;
     if (q.unit === "unlimited" || q.limit == null) return;
+    var wasUsable = isUsable(employee);
     var use = Math.max(1, Math.ceil((q.limit / 100) * weight * .08));
     q.remaining = Math.max(0, q.remaining - use);
+    if (wasUsable && !isUsable(employee)) {
+      addLog("QUOTA WARNING",employee.name+" 예약선 도달 · 신규 비핵심 작업 배정 중단",lineId);
+    }
   }
 
   function ensureContinuity() {
@@ -185,8 +220,12 @@
       id:"line-"+Date.now()+"-"+Math.random().toString(36).slice(2,7),
       ideaId:idea.id,
       title:idea.title,
+      topicName:state.topic ? state.topic.name : "game",
       stage:2,
       status:"running",
+      autopilot:state.settings.autopilot,
+      publication:{status:"not_ready",repository:null},
+      handoffs:[],
       artifacts:["project-brief.md","idea-review.json","greenlight-draft.md"],
       history:[{time:now(),text:automatic ? "자동 shortlist로 생산라인 개설" : "CEO 지시로 생산라인 개설"}]
     });
@@ -210,7 +249,7 @@
     };
 
     state.ideas = generateIdeas(topic, state.topic.genre);
-    state.lines = [];
+    state.lines = state.lines.filter(function (line) { return line.status === "complete"; });
     state.backlog = [];
 
     var n = Math.min(state.settings.autoShortlist, state.settings.maxParallel, state.ideas.length);
@@ -227,10 +266,40 @@
     render();
   }
 
-  function runLine(lineId) {
+  function queueCompletedLine(line) {
+    if (state.reviews.some(function (review) { return review.lineId === line.id; })) return;
+    var repository = slugify(line.topicName || "game")+"-"+slugify(line.title.split("·").pop());
+    var owner = state.settings.githubOwner || "thstjdals09-lang";
+    var repositoryUrl = "https://github.com/"+owner+"/"+encodeURIComponent(repository);
+    var pagesUrl = "https://"+owner+".github.io/"+encodeURIComponent(repository)+"/";
+    line.publication = {
+      status:state.settings.autoPublish ? "queued" : "waiting_for_approval",
+      repository:repository,
+      repositoryUrl:repositoryUrl,
+      pagesUrl:pagesUrl
+    };
+    state.reviews.unshift({
+      id:"review-"+Date.now()+"-"+Math.random().toString(36).slice(2,6),
+      lineId:line.id,
+      title:line.title,
+      status:"pending",
+      qaStatus:"passed",
+      build:"release-build.zip",
+      repository:repository,
+      repositoryUrl:repositoryUrl,
+      pagesUrl:pagesUrl,
+      createdAt:now()
+    });
+    addLog("BUILD READY",line.title+" · QA 통과 · CEO Review 대기",line.id);
+    if (state.settings.autoPublish) {
+      addLog("PUBLISH QUEUED",repository+" 저장소 생성·commit·push 작업을 보안 백엔드에 예약",line.id);
+    }
+  }
+
+  function runLine(lineId, automated) {
     ensureContinuity();
     var line = state.lines.find(function (x) { return x.id === lineId; });
-    if (!line) return;
+    if (!line || line.status !== "running") return;
 
     var stage = STAGES[line.stage];
     if (!stage) return;
@@ -259,7 +328,14 @@
         assignments.push(role+" → 대기");
         return;
       }
-      consume(routed.employee, weights[stage[0]] || 4);
+      if (routed.failoverFrom) {
+        var handoffKey = stage[0]+":"+role+":"+routed.failoverFrom.id+":"+routed.employee.id;
+        if (line.handoffs.indexOf(handoffKey) === -1) {
+          line.handoffs.push(handoffKey);
+          addLog("FAILOVER",routed.failoverFrom.name+" 예약선 보호 → "+routed.employee.name+"에게 "+role+" handoff",line.id);
+        }
+      }
+      consume(routed.employee, weights[stage[0]] || 4, line.id);
       assignments.push(role+" → "+routed.employee.name);
     });
 
@@ -287,9 +363,30 @@
     addLog("PRODUCTION",line.title+" · "+stage[1]+" 완료",line.id);
 
     if (line.stage < STAGES.length - 1) line.stage += 1;
-    else line.status = "complete";
+    else {
+      line.status = "complete";
+      line.autopilot = false;
+      queueCompletedLine(line);
+    }
 
     save();
+    if (!automated) render();
+  }
+
+  function automationTick() {
+    if (!state.user.signedIn || !state.settings.autopilot) return;
+    var running = state.lines.filter(function (line) {
+      return line.status === "running" && line.autopilot;
+    });
+    if (!running.length) return;
+    running.forEach(function (line) { runLine(line.id, true); });
+    if (activeTab === "dashboard" || activeTab === "lines" || activeTab === "review" || activeTab === "results") render();
+  }
+
+  function finishLine(lineId) {
+    var guard = STAGES.length + 2;
+    var line = state.lines.find(function (x) { return x.id === lineId; });
+    while (line && line.status === "running" && guard-- > 0) runLine(lineId, true);
     render();
   }
 
@@ -345,6 +442,44 @@
     render();
   }
 
+  function toggleLineAutopilot(lineId) {
+    var line = state.lines.find(function (x) { return x.id === lineId; });
+    if (!line || line.status !== "running") return;
+    line.autopilot = !line.autopilot;
+    addLog("AUTOPILOT",line.title+" · "+(line.autopilot ? "자동 진행 재개" : "자동 진행 일시정지"),line.id);
+    save();
+    render();
+  }
+
+  function approveReview(reviewId) {
+    var review = state.reviews.find(function (x) { return x.id === reviewId; });
+    if (!review) return;
+    review.status = "approved";
+    review.reviewedAt = now();
+    addLog("CEO APPROVED",review.title+" 출시 빌드 승인",review.lineId);
+    save();
+    render();
+  }
+
+  function reviseReview(reviewId) {
+    var review = state.reviews.find(function (x) { return x.id === reviewId; });
+    var line = review && state.lines.find(function (x) { return x.id === review.lineId; });
+    var input = document.getElementById("revision-"+reviewId);
+    var note = input ? String(input.value || "").trim() : "";
+    if (!review || !line || !note) return;
+    review.status = "revision_requested";
+    review.reviewedAt = now();
+    line.status = "running";
+    line.stage = 10;
+    line.autopilot = true;
+    line.publication.status = "held_for_revision";
+    line.history.unshift({time:now(),text:"CEO 수정명령: "+note});
+    addLog("CEO REVISION",line.title+" · "+note,line.id);
+    save();
+    activeTab = "lines";
+    render();
+  }
+
   function fakeGoogleLogin() {
     state.user = {signedIn:true,email:"ceo@example.com",name:"CEO (Preview)"};
     addLog("AUTH","Google 로그인 프리뷰 세션 생성");
@@ -396,6 +531,8 @@
     ["dashboard","대시보드"],
     ["ideas","아이디어"],
     ["lines","생산라인"],
+    ["review","CEO Review"],
+    ["results","결과물"],
     ["team","AI 사원"],
     ["market","AI 마켓"],
     ["logs","로그"],
@@ -449,6 +586,8 @@
       dashboard:"대표 대시보드",
       ideas:"아이디어 포트폴리오",
       lines:"게임 생산라인",
+      review:"CEO Review",
+      results:"완성 게임 결과물",
       team:"AI 사원 / 사용량",
       market:"AI 플러그인 마켓",
       logs:"공장 로그",
@@ -465,6 +604,8 @@
     if (activeTab === "dashboard") renderDashboard();
     else if (activeTab === "ideas") renderIdeas();
     else if (activeTab === "lines") renderLines();
+    else if (activeTab === "review") renderReview();
+    else if (activeTab === "results") renderResults();
     else if (activeTab === "team") renderTeam();
     else if (activeTab === "market") renderMarket();
     else if (activeTab === "logs") renderLogs();
@@ -605,7 +746,9 @@
           var cls = idx < line.stage ? "done" : (idx === line.stage ? "current" : "");
           return '<div class="miniStage '+cls+'"><span>'+(idx+1)+'</span><small>'+esc(s[1])+'</small></div>';
         }).join("")+'</div>'+
-        '<div class="lineActions"><button class="button primary" data-run="'+esc(line.id)+'">공정 자동 실행</button></div>'+
+        '<div class="lineActions">'+
+          (line.status === "running" ? '<button class="button" data-auto="'+esc(line.id)+'">'+(line.autopilot ? "자동진행 일시정지" : "자동진행 재개")+'</button><button class="button primary" data-finish="'+esc(line.id)+'">완성까지 즉시 실행</button>' : '<button class="button primary" data-results="1">결과물 보기</button>')+
+        '</div>'+
         '<div class="feedbackBox"><input id="fb-'+esc(line.id)+'" placeholder="CEO 수정명령"><button class="button" data-feedback="'+esc(line.id)+'">피드백 반영</button></div>'+
         '<div class="artifactMini"><strong>산출물</strong><small>'+line.artifacts.map(esc).join(" · ")+'</small></div>'+
       '</div>';
@@ -615,12 +758,72 @@
       b.onclick = function () { runLine(b.getAttribute("data-run")); };
     });
 
+    v.querySelectorAll("[data-auto]").forEach(function (b) {
+      b.onclick = function () { toggleLineAutopilot(b.getAttribute("data-auto")); };
+    });
+
+    v.querySelectorAll("[data-finish]").forEach(function (b) {
+      b.onclick = function () { finishLine(b.getAttribute("data-finish")); };
+    });
+
+    v.querySelectorAll("[data-results]").forEach(function (b) {
+      b.onclick = function () { activeTab = "results"; renderView(); };
+    });
+
     v.querySelectorAll("[data-feedback]").forEach(function (b) {
       b.onclick = function () {
         var id = b.getAttribute("data-feedback");
         addFeedback(id, document.getElementById("fb-"+id).value);
       };
     });
+  }
+
+  function renderReview() {
+    var v = document.getElementById("view");
+    if (!state.reviews.length) {
+      v.innerHTML = '<div class="empty">자동 생산이 완료되면 최신 빌드와 QA 결과가 이곳에 도착합니다.</div>';
+      return;
+    }
+
+    v.innerHTML = '<div class="cards">'+state.reviews.map(function (review) {
+      return '<div class="panel reviewCard">'+
+        '<div class="panelHeader"><div><div class="eyebrow">RELEASE CANDIDATE</div><h2>'+esc(review.title)+'</h2></div><span class="badge">'+esc(review.status.toUpperCase())+'</span></div>'+
+        '<div class="reviewFacts"><span>빌드 <strong>'+esc(review.build)+'</strong></span><span>QA <strong>'+esc(review.qaStatus.toUpperCase())+'</strong></span><span>게시 <strong>AUTO QUEUED</strong></span></div>'+
+        '<p class="muted">'+esc(review.createdAt)+' · 저장소 '+esc(review.repository)+'</p>'+
+        (review.status === "pending" ? '<div class="feedbackBox"><input id="revision-'+esc(review.id)+'" placeholder="수정이 필요하면 지시를 입력"><button class="button" data-revise="'+esc(review.id)+'">수정 요청</button><button class="button primary" data-approve="'+esc(review.id)+'">승인</button></div>' : '')+
+      '</div>';
+    }).join("")+'</div>';
+
+    v.querySelectorAll("[data-approve]").forEach(function (b) {
+      b.onclick = function () { approveReview(b.getAttribute("data-approve")); };
+    });
+    v.querySelectorAll("[data-revise]").forEach(function (b) {
+      b.onclick = function () { reviseReview(b.getAttribute("data-revise")); };
+    });
+  }
+
+  function renderResults() {
+    var v = document.getElementById("view");
+    var completed = state.lines.filter(function (line) { return line.status === "complete" || line.publication.status !== "not_ready"; });
+    if (!completed.length) {
+      v.innerHTML = '<div class="empty">완성된 게임이 아직 없습니다. 생산라인은 Autopilot으로 계속 진행됩니다.</div>';
+      return;
+    }
+
+    v.innerHTML = '<div class="resultGrid">'+completed.map(function (line) {
+      var publication = line.publication || {};
+      var isLive = publication.status === "published";
+      return '<div class="panel resultCard">'+
+        '<div class="resultCover"><span>GAME BUILD</span><strong>'+esc(line.title)+'</strong></div>'+
+        '<div class="panelHeader"><div><div class="eyebrow">GITHUB DELIVERY</div><h2>'+esc(publication.repository || line.title)+'</h2></div><span class="badge">'+esc((publication.status || "queued").toUpperCase())+'</span></div>'+
+        '<div class="artifactMini"><strong>Release Build</strong><small>release-build.zip · QA passed · '+line.artifacts.length+' artifacts</small></div>'+
+        '<div class="resultLinks">'+
+          '<a class="button" href="'+esc(publication.repositoryUrl || "#")+'" target="_blank" rel="noopener">GitHub 저장소</a>'+
+          '<a class="button primary '+(isLive ? '' : 'disabledLink')+'" href="'+esc(publication.pagesUrl || "#")+'" target="_blank" rel="noopener">'+(isLive ? '게임 실행하기 ↗' : 'Pages 주소 보기 ↗')+'</a>'+
+        '</div>'+
+        (!isLive ? '<p class="muted smallCopy">예정 주소입니다. 백엔드 게시 Worker가 저장소 생성·commit·push·Pages 활성화를 마치면 자동으로 LIVE로 바뀝니다.</p>' : '')+
+      '</div>';
+    }).join("")+'</div>';
   }
 
   function renderTeam() {
@@ -693,6 +896,9 @@
             '<label>기본 정책<select id="policy"><option value="cheapest_viable">최저비용 + 충분한 품질</option><option value="quality">품질 우선</option><option value="speed">속도 우선</option></select></label>'+
             '<label>최대 동시 생산라인<input id="parallel" type="number" min="1" max="10" value="'+state.settings.maxParallel+'"></label>'+
             '<label>자동 shortlist 수<input id="shortlist" type="number" min="1" max="10" value="'+state.settings.autoShortlist+'"></label>'+
+            '<label>GitHub 계정<input id="githubOwner" value="'+esc(state.settings.githubOwner || "thstjdals09-lang")+'"></label>'+
+            '<label class="checkLabel"><input id="autopilot" type="checkbox" '+(state.settings.autopilot ? "checked" : "")+'> 생산라인 Autopilot</label>'+
+            '<label class="checkLabel"><input id="autoPublish" type="checkbox" '+(state.settings.autoPublish ? "checked" : "")+'> 완성 게임 GitHub 자동 게시</label>'+
             '<button class="button primary" id="saveSettings">저장</button>'+
           '</div>'+
         '</div>'+
@@ -708,6 +914,12 @@
       state.settings.policy = document.getElementById("policy").value;
       state.settings.maxParallel = Number(document.getElementById("parallel").value);
       state.settings.autoShortlist = Number(document.getElementById("shortlist").value);
+      state.settings.githubOwner = String(document.getElementById("githubOwner").value || "thstjdals09-lang").trim();
+      state.settings.autopilot = document.getElementById("autopilot").checked;
+      state.settings.autoPublish = document.getElementById("autoPublish").checked;
+      if (state.settings.autopilot) {
+        state.lines.forEach(function (line) { if (line.status === "running") line.autopilot = true; });
+      }
       save();
       renderView();
     };
@@ -715,4 +927,5 @@
   }
 
   render();
+  setInterval(automationTick, AUTOMATION_INTERVAL_MS);
 })();

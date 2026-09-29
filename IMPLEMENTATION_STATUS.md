@@ -32,11 +32,12 @@ Legend: `[x]` implemented, `[-]` partially implemented, `[ ]` not implemented.
 - [x] Quota gauges
 - [x] `CHEAPEST_VIABLE_QUALITY` browser routing simulation
 - [x] Per-provider reserve threshold
-- [-] Automatic failover: local fallback exists, but handoff history and failure controls are incomplete
+- [x] Automatic failover simulation with reserve protection and handoff logs
 - [x] CEO feedback entry and production log
-- [-] Autonomous operation: each stage still requires a CEO click
-- [ ] Dedicated CEO Review queue with build/QA/approval state
-- [ ] Completed-line automatic GitHub repository creation, commit, and push
+- [x] Autonomous stage-by-stage Autopilot with pause/resume and instant-complete controls
+- [x] Dedicated CEO Review queue with build/QA/approval/revision state
+- [x] Left-side completed-game results view with repository and GitHub Pages addresses
+- [-] Completed-line automatic GitHub publishing is queued in the preview; the secure backend publisher is the next implementation unit
 
 ## P1 — backend data and account structure
 
@@ -91,7 +92,7 @@ Legend: `[x]` implemented, `[-]` partially implemented, `[ ]` not implemented.
 
 ## Immediate implementation order
 
-1. Remove per-stage CEO clicking with an autopilot run/queue and visible failover events.
-2. Add a CEO Review queue for completed builds and revision/approval actions.
-3. Add a server-side GitHub publisher that creates a repository and pushes a completed generated project without exposing a token to the browser.
-4. Connect the browser completion event to the backend publisher once authenticated backend sessions exist.
+1. Add a server-side GitHub publisher that creates a game-named repository, commits, pushes, and enables GitHub Pages without exposing a token to the browser.
+2. Persist the returned repository and `github.io` URLs on the production line.
+3. Connect the browser completion queue to the authenticated backend publisher.
+4. Continue P1 persistence and account boundaries.
