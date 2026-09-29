@@ -37,7 +37,8 @@ Legend: `[x]` implemented, `[-]` partially implemented, `[ ]` not implemented.
 - [x] Autonomous stage-by-stage Autopilot with pause/resume and instant-complete controls
 - [x] Dedicated CEO Review queue with build/QA/approval/revision state
 - [x] Left-side completed-game results view with repository and GitHub Pages addresses
-- [-] Completed-line automatic GitHub publishing is queued in the preview; the secure backend publisher is the next implementation unit
+- [x] Server-side game-named repository creation/update, release commit, main-ref push, and GitHub Pages activation
+- [-] Preview completion queues a secure backend publish job; authenticated browser-to-backend wiring remains P1 work
 
 ## P1 — backend data and account structure
 
@@ -70,7 +71,7 @@ Legend: `[x]` implemented, `[-]` partially implemented, `[ ]` not implemented.
 - [ ] Worker commit
 - [ ] Reviewer diff and automated tests
 - [ ] Merge and worktree cleanup
-- [ ] Server-side GitHub repository publisher
+- [x] Server-side GitHub repository publisher
 
 ## P4 — end-to-end generated game
 
@@ -92,7 +93,7 @@ Legend: `[x]` implemented, `[-]` partially implemented, `[ ]` not implemented.
 
 ## Immediate implementation order
 
-1. Add a server-side GitHub publisher that creates a game-named repository, commits, pushes, and enables GitHub Pages without exposing a token to the browser.
-2. Persist the returned repository and `github.io` URLs on the production line.
-3. Connect the browser completion queue to the authenticated backend publisher.
+1. Persist production lines and publish-job results in the backend.
+2. Connect the browser completion queue to the authenticated backend publisher.
+3. Replace the preview's predicted URLs with the publisher's returned repository and `github.io` URLs.
 4. Continue P1 persistence and account boundaries.

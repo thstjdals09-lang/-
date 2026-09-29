@@ -56,3 +56,24 @@ uvicorn app.main:app --reload
 ```
 
 The desktop frontend will be added after the routing core is covered by tests.
+
+## Publish a completed game to GitHub Pages
+
+The backend can create or update a repository named after the game, create a release commit on `main`, and enable GitHub Pages. Credentials stay on the backend and are never accepted from or returned to the browser.
+
+```bash
+cd backend
+copy .env.example .env
+# Set AI_FACTORY_GITHUB_TOKEN in the server environment.
+uvicorn app.main:app --reload
+```
+
+Required token access:
+
+- create and update repositories for the configured owner
+- write repository contents
+- administer GitHub Pages for those repositories
+
+Check configuration with `GET /publishing/github/status`. Submit the completed text release files, including a root `index.html`, to `POST /publishing/github`. The response contains both `repository_url` and the playable `pages_url`.
+
+The publisher rejects traversal paths, `.git`, `.env`, common credential files, private-key extensions, oversized files, and releases without a root `index.html`.

@@ -6,7 +6,9 @@
 # Python
 __pycache__/
 *.py[cod]
+*.egg-info/
 .pytest_cache/
+pytest-cache-files-*/
 .venv/
 venv/
 dist/
