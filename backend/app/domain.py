@@ -1,0 +1,103 @@
+from __future__ import annotations
+
+from enum import StrEnum
+from typing import Literal
+
+from pydantic import BaseModel, Field, model_validator
+
+
+class EmployeeStatus(StrEnum):
+    ONLINE = "online"
+    BUSY = "busy"
+    OFFLINE = "offline"
+    DISABLED = "disabled"
+
+
+class RoutingPolicy(StrEnum):
+    BALANCED = "balanced"
+    QUALITY = "quality"
+    FREE = "free"
+    SPEED = "speed"
+
+
+class TaskType(StrEnum):
+    CODING = "coding"
+    PLANNING = "planning"
+    DESIGN = "design"
+    VISION = "vision"
+    DEBUGGING = "debugging"
+    QA = "qa"
+    GENERAL = "general"
+
+
+class CapabilityScores(BaseModel):
+    coding: float = Field(default=50, ge=0, le=100)
+    planning: float = Field(default=50, ge=0, le=100)
+    design: float = Field(default=50, ge=0, le=100)
+    vision: float = Field(default=0, ge=0, le=100)
+    debugging: float = Field(default=50, ge=0, le=100)
+    qa: float = Field(default=50, ge=0, le=100)
+    speed: float = Field(default=50, ge=0, le=100)
+    reliability: float = Field(default=50, ge=0, le=100)
+
+
+class AIEmployeeCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    provider: str = Field(min_length=1, max_length=100)
+    model: str = Field(min_length=1, max_length=200)
+    api_key_env: str | None = Field(
+        default=None,
+        description="Environment variable containing the provider API key. Never store the key itself.",
+    )
+    base_url: str | None = None
+    status: EmployeeStatus = EmployeeStatus.ONLINE
+    quota_unit: Literal["tokens", "requests", "neurons", "credits", "unlimited", "unknown"] = "unknown"
+    quota_remaining: float | None = Field(default=None, ge=0)
+    quota_limit: float | None = Field(default=None, gt=0)
+    capabilities: CapabilityScores = Field(default_factory=CapabilityScores)
+
+    @model_validator(mode="after")
+    def validate_quota(self) -> "AIEmployeeCreate":
+        if self.quota_unit == "unlimited":
+            self.quota_remaining = None
+            self.quota_limit = None
+            return self
+
+        if self.quota_remaining is not None and self.quota_limit is None:
+            raise ValueError("quota_limit is required when quota_remaining is set")
+        if (
+            self.quota_remaining is not None
+            and self.quota_limit is not None
+            and self.quota_remaining > self.quota_limit
+        ):
+            raise ValueError("quota_remaining cannot exceed quota_limit")
+        return self
+
+
+class AIEmployee(AIEmployeeCreate):
+    id: int
+
+
+class TaskCreate(BaseModel):
+    task_type: TaskType
+    prompt: str = Field(min_length=1)
+    policy: RoutingPolicy = RoutingPolicy.BALANCED
+
+
+class RoutingCandidate(BaseModel):
+    employee_id: int
+    employee_name: str
+    provider: str
+    model: str
+    score: float
+    capability_score: float
+    quota_ratio: float
+    speed_score: float
+    reliability_score: float
+
+
+class RoutingDecision(BaseModel):
+    task_type: TaskType
+    policy: RoutingPolicy
+    selected: RoutingCandidate
+    candidates: list[RoutingCandidate]
