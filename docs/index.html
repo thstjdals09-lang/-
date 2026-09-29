@@ -1,69 +1,14 @@
 <!doctype html>
 <html lang="ko">
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>AI Factory Preview</title>
-<style>
-*{box-sizing:border-box}body{margin:0;font-family:Inter,Pretendard,"Noto Sans KR",system-ui,sans-serif;background:#080b10;color:#eef3f8}button,input,select,textarea{font:inherit}.app{display:grid;grid-template-columns:220px 1fr;min-height:100vh}.side{padding:22px 14px;border-right:1px solid #1f2935;background:#0c1118;position:sticky;top:0;height:100vh}.brand{display:flex;align-items:center;gap:10px;margin-bottom:26px}.logo{width:38px;height:38px;display:grid;place-items:center;border-radius:11px;background:linear-gradient(135deg,#786eff,#5747ed);font-weight:900}.brand small{display:block;color:#6f7d8d}.nav{display:grid;gap:6px}.nav button{padding:11px 13px;border:1px solid transparent;background:transparent;color:#8d99a8;text-align:left;border-radius:9px;cursor:pointer}.nav button.active{background:#171e28;color:white;border-color:#283445}.foot{position:absolute;bottom:18px;left:16px;right:16px;padding:11px;border:1px solid #213040;border-radius:9px;color:#97a4b3;font-size:12px}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#46dc7b;margin-right:7px}.main{padding:34px;max-width:1400px;width:100%}.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}.eyebrow{color:#718196;font-size:11px;font-weight:800;letter-spacing:.15em}.top h1{margin:4px 0 0}.badge{padding:6px 10px;border:1px solid #3b3f71;background:#171a32;color:#aaa6ff;border-radius:99px;font-size:11px;font-weight:800}.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.card,.panel{border:1px solid #202b38;background:linear-gradient(180deg,#121922,#0d131a);border-radius:13px}.card{padding:18px}.card span,.card small{display:block;color:#7e8b9b}.card strong{display:block;font-size:26px;margin:8px 0 3px}.panel{padding:20px;margin-top:14px}.row2{display:grid;grid-template-columns:1.2fr .8fr;gap:14px}.list{display:grid;gap:9px}.employee,.log{padding:13px;border:1px solid #202d3a;border-radius:10px;background:#0a1016;display:flex;justify-content:space-between;gap:15px}.employee small,.log small{display:block;color:#6f7f90;margin-top:4px}.form{display:grid;gap:10px}.form input,.form select,.form textarea{width:100%;padding:10px 11px;border:1px solid #283545;background:#091017;color:#eef3f8;border-radius:9px}.formrow{display:grid;grid-template-columns:1fr 1fr;gap:9px}.primary{padding:11px;border:0;border-radius:9px;background:linear-gradient(135deg,#6f64ff,#5443ed);color:#fff;font-weight:800;cursor:pointer}.empty{padding:24px;border:1px dashed #263647;border-radius:9px;color:#68798a;text-align:center}.selected{text-align:center;padding:36px 10px}.selected .score{font-size:46px;font-weight:900;color:#8c85ff}.hidden{display:none}.notice{margin:0 0 14px;padding:10px 12px;border:1px solid #2a3746;border-radius:9px;background:#101720;color:#bdc8d5}.progress{height:9px;border-radius:99px;background:#080d12;overflow:hidden}.progress i{display:block;width:42%;height:100%;background:linear-gradient(90deg,#645cff,#8a82ff)}@media(max-width:900px){body{min-width:0}.app{grid-template-columns:1fr}.side{position:relative;height:auto}.foot{position:static;margin-top:14px}.main{padding:20px}.grid4,.row2{grid-template-columns:1fr}.nav{grid-template-columns:repeat(3,1fr)}.nav button{text-align:center}}
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#070a0f">
+  <title>AI Factory · Game Studio OS</title>
+  <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-<div class="app">
-<aside class="side">
-  <div class="brand"><div class="logo">AF</div><div><strong>AI Factory</strong><small>CEO Console</small></div></div>
-  <div class="nav" id="nav"></div>
-  <div class="foot"><span class="dot"></span>Web Preview<br><small>GitHub repository build</small></div>
-</aside>
-<main class="main">
-  <div class="top"><div><div class="eyebrow">AI SOFTWARE COMPANY</div><h1 id="title">대표 대시보드</h1></div><span class="badge">PUBLIC PREVIEW</span></div>
-  <div id="notice" class="notice">이 웹 버전은 다른 PC·휴대폰에서도 열 수 있습니다. 데이터는 현재 브라우저에 저장됩니다.</div>
-  <section id="dashboard"></section>
-  <section id="employees" class="hidden"></section>
-  <section id="tasks" class="hidden"></section>
-  <section id="logs" class="hidden"></section>
-  <section id="projects" class="hidden"></section>
-  <section id="settings" class="hidden"></section>
-</main>
-</div>
-<script>
-const caps={coding:70,planning:70,design:50,vision:0,debugging:70,qa:70,speed:70,reliability:80};
-const seeds=[
-{id:1,name:"Cerebras Coder",provider:"cerebras",model:"gpt-oss-120b",status:"online",quota_unit:"tokens",quota_remaining:780000,quota_limit:1000000,capabilities:{...caps,coding:95,debugging:93,speed:98,reliability:89}},
-{id:2,name:"Gemini Planner",provider:"google",model:"gemini",status:"online",quota_unit:"requests",quota_remaining:72,quota_limit:100,capabilities:{...caps,planning:95,vision:96,design:88,reliability:91}},
-{id:3,name:"Local Worker",provider:"local",model:"llama.cpp",status:"online",quota_unit:"unlimited",quota_remaining:null,quota_limit:null,capabilities:{...caps,coding:76,qa:88,speed:58,reliability:94}}
-];
-let employees=JSON.parse(localStorage.getItem("af-employees")||"null")||seeds;
-let logs=JSON.parse(localStorage.getItem("af-logs")||"[]");
-const tabs=[["dashboard","대시보드"],["projects","프로젝트"],["employees","AI 사원"],["tasks","작업 배정"],["logs","작업 로그"],["settings","설정"]];
-const titleMap={dashboard:"대표 대시보드",projects:"프로젝트",employees:"AI 사원 관리",tasks:"작업 자동 배정",logs:"작업 로그",settings:"설정"};
-const nav=document.getElementById("nav");
-tabs.forEach(([id,label],i)=>{const b=document.createElement("button");b.textContent=label;b.className=i===0?"active":"";b.onclick=()=>show(id,b);nav.appendChild(b)});
-function show(id,b){document.querySelectorAll("main section").forEach(x=>x.classList.add("hidden"));document.getElementById(id).classList.remove("hidden");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");document.getElementById("title").textContent=titleMap[id];render()}
-function qratio(e){if(e.quota_unit==="unlimited")return 1;if(e.quota_remaining==null||e.quota_limit==null)return .5;return Math.max(0,Math.min(1,e.quota_remaining/e.quota_limit))}
-function weights(p){return p==="quality"?[.65,.1,.1,.15]:p==="free"?[.35,.45,.1,.1]:p==="speed"?[.35,.1,.45,.1]:[.45,.25,.15,.15]}
-function route(type,policy){const key={coding:"coding",planning:"planning",design:"design",vision:"vision",debugging:"debugging",qa:"qa",general:"reliability"}[type]||"reliability";const [a,b,c,d]=weights(policy);return employees.filter(e=>e.status==="online").map(e=>({employee:e,score:e.capabilities[key]*a+qratio(e)*100*b+e.capabilities.speed*c+e.capabilities.reliability*d})).sort((x,y)=>y.score-x.score)[0]}
-function save(){localStorage.setItem("af-employees",JSON.stringify(employees));localStorage.setItem("af-logs",JSON.stringify(logs))}
-function render(){
-document.getElementById("dashboard").innerHTML=`
-<div class="grid4">
-<div class="card"><span>등록된 AI 사원</span><strong>${employees.length}</strong><small>${employees.filter(e=>e.status==="online").length}명 온라인</small></div>
-<div class="card"><span>라우팅 기록</span><strong>${logs.length}</strong><small>브라우저 저장</small></div>
-<div class="card"><span>현재 정책</span><strong>Auto</strong><small>능력 + 쿼터 + 속도</small></div>
-<div class="card"><span>V0 단계</span><strong>Build</strong><small>사원관리 / Router</small></div></div>
-<div class="panel"><div class="eyebrow">FACTORY STATUS</div><h2>현재 회사 상태</h2><div class="progress"><i></i></div><p style="color:#8290a0">AI 사원 등록 → 자동 라우팅 · 다음: 실제 Provider API 실행</p></div>`;
-document.getElementById("employees").innerHTML=`
-<div class="row2"><div class="panel"><div class="eyebrow">EMPLOYEE REGISTRY</div><h2>등록된 AI 사원</h2><div class="list">${employees.map(e=>`<div class="employee"><div><strong>${e.name}</strong><small>${e.provider} · ${e.model}</small></div><div><small>CODING ${e.capabilities.coding}</small><small>SPEED ${e.capabilities.speed}</small></div></div>`).join("")}</div></div>
-<div class="panel"><div class="eyebrow">HIRE AI</div><h2>AI 사원 추가</h2><form class="form" id="hire"><input name="name" placeholder="사원 이름" required><input name="provider" placeholder="Provider" required><input name="model" placeholder="Model ID" required><select name="quota"><option value="unknown">쿼터 알 수 없음</option><option value="tokens">Tokens</option><option value="requests">Requests</option><option value="unlimited">Unlimited / Local</option></select><div class="formrow"><input name="remain" type="number" placeholder="남은 무료량"><input name="limit" type="number" placeholder="전체 무료량"></div><button class="primary">+ AI 사원 채용</button></form></div></div>`;
-const hire=document.getElementById("hire");if(hire)hire.onsubmit=e=>{e.preventDefault();const f=new FormData(hire);employees.push({id:Date.now(),name:f.get("name"),provider:f.get("provider"),model:f.get("model"),status:"online",quota_unit:f.get("quota"),quota_remaining:f.get("remain")?Number(f.get("remain")):null,quota_limit:f.get("limit")?Number(f.get("limit")):null,capabilities:{...caps}});save();render()};
-document.getElementById("tasks").innerHTML=`
-<div class="row2"><div class="panel"><div class="eyebrow">AUTO ROUTER</div><h2>작업 요청</h2><form class="form" id="taskform"><textarea name="prompt" rows="8" placeholder="예: 로그인 화면 버그 수정해줘" required></textarea><div class="formrow"><select name="type"><option value="coding">코딩</option><option value="planning">기획</option><option value="design">디자인</option><option value="debugging">디버깅</option><option value="qa">QA</option></select><select name="policy"><option value="balanced">균형</option><option value="quality">품질 우선</option><option value="free">무료량 우선</option><option value="speed">속도 우선</option></select></div><button class="primary">Router에게 자동 배정</button></form></div><div class="panel"><div class="eyebrow">ROUTING RESULT</div><h2>담당 AI</h2><div id="result" class="empty">작업을 입력하면 Router가 담당자를 선택합니다.</div></div></div>`;
-const tf=document.getElementById("taskform");if(tf)tf.onsubmit=e=>{e.preventDefault();const f=new FormData(tf),r=route(f.get("type"),f.get("policy"));if(!r)return;document.getElementById("result").className="selected";document.getElementById("result").innerHTML=`<span class="badge">SELECTED</span><h2>${r.employee.name}</h2><small>${r.employee.provider} · ${r.employee.model}</small><div class="score">${r.score.toFixed(2)}</div><small>Router 적합도 점수</small>`;logs.unshift({id:Date.now(),task:{task_type:f.get("type"),prompt:f.get("prompt"),policy:f.get("policy")},employee:r.employee.name,score:r.score.toFixed(2),created_at:new Date().toLocaleString("ko-KR")});save()};
-document.getElementById("logs").innerHTML=`<div class="panel"><div class="eyebrow">ROUTING HISTORY</div><h2>작업 로그</h2><div class="list">${logs.length?logs.map(l=>`<div class="log"><div><strong>${l.task.task_type}</strong><small>${l.task.prompt}</small></div><div><strong>${l.employee}</strong><small>${l.created_at}</small></div></div>`).join(""):'<div class="empty">기록된 라우팅이 없습니다.</div>'}</div></div>`;
-document.getElementById("projects").innerHTML='<div class="panel"><div class="eyebrow">COMING NEXT</div><h2>프로젝트 공장</h2><p style="color:#8290a0">기획 → 개발 → 리뷰 → QA → 배포 자동화가 이 탭에 추가됩니다.</p></div>';
-document.getElementById("settings").innerHTML='<div class="panel"><div class="eyebrow">FACTORY SETTINGS</div><h2>설정</h2><p style="color:#8290a0">Provider API와 라우팅 정책 설정이 추가될 예정입니다.</p></div>';
-}
-render();
-</script>
+  <div id="app"></div>
+  <script src="./app.js"></script>
 </body>
 </html>
