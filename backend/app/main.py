@@ -1,15 +1,21 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, HTTPException, Query
 
 from .domain import AIEmployee, AIEmployeeCreate, RoutingDecision, TaskCreate
 from .router import route_task
+from .store import create_employee, init_db, list_employees, list_routing_logs, save_routing_log
 
 
-app = FastAPI(title="AI Factory Core", version="0.1.0")
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    init_db()
+    yield
 
-_EMPLOYEES: dict[int, AIEmployee] = {}
-_NEXT_ID = 1
+
+app = FastAPI(title="AI Factory Core", version="0.1.0", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -18,22 +24,26 @@ def health() -> dict[str, str]:
 
 
 @app.get("/employees", response_model=list[AIEmployee])
-def list_employees() -> list[AIEmployee]:
-    return list(_EMPLOYEES.values())
+def get_employees() -> list[AIEmployee]:
+    return list_employees()
 
 
 @app.post("/employees", response_model=AIEmployee, status_code=201)
-def create_employee(payload: AIEmployeeCreate) -> AIEmployee:
-    global _NEXT_ID
-    employee = AIEmployee(id=_NEXT_ID, **payload.model_dump())
-    _EMPLOYEES[_NEXT_ID] = employee
-    _NEXT_ID += 1
-    return employee
+def post_employee(payload: AIEmployeeCreate) -> AIEmployee:
+    return create_employee(payload)
 
 
 @app.post("/route", response_model=RoutingDecision)
 def route(payload: TaskCreate) -> RoutingDecision:
     try:
-        return route_task(payload, list(_EMPLOYEES.values()))
+        decision = route_task(payload, list_employees())
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    save_routing_log(payload, decision)
+    return decision
+
+
+@app.get("/routing-logs")
+def get_routing_logs(limit: int = Query(default=100, ge=1, le=500)) -> list[dict]:
+    return list_routing_logs(limit)
