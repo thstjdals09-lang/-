@@ -1,5 +1,13 @@
 # AI Factory
 
+## Live web preview
+
+Open the current browser preview from any PC or phone:
+
+https://raw.githack.com/thstjdals09-lang/-/main/docs/index.html
+
+The preview is built from `docs/index.html` in this repository and is updated as development continues.
+
 AI Factory is a local-first multi-agent software production system.
 
 The human owner acts as CEO. AI employees are registered with provider/model metadata, capabilities, quotas, and availability. A router assigns work automatically based on task type, quality, speed, free quota, and reliability.
