@@ -22,8 +22,8 @@ Legend: `[x]` implemented, `[-]` partially implemented, `[ ]` not implemented.
 - [x] CEO dashboard
 - [x] Topic intake
 - [x] Topic change with completed-result preservation and paused-line resume
-- [x] Deterministic simulation of ten game ideas
-- [x] Automatic scoring and shortlist
+- [x] Deterministic simulation of ten game ideas with nine-factor evaluation and role critiques
+- [x] Weighted automatic scoring and shortlist
 - [x] Idea Backlog and “build this idea” action
 - [x] Multiple independent production-line cards
 - [x] All 13 real game-studio stages
@@ -39,6 +39,8 @@ Legend: `[x]` implemented, `[-]` partially implemented, `[ ]` not implemented.
 - [x] Dedicated CEO Review queue with build/QA/approval/revision state
 - [x] Left-side completed-game results view with repository and GitHub Pages addresses
 - [x] Real standalone HTML5 microgame generation, in-browser play, smoke validation, and download
+- [x] Per-line GDD, QA acceptance criteria, risk register, and dependency-aware production task graph
+- [x] Idea-specific Strategy, Action, and Management playable game families
 - [x] Server-side game-named repository creation/update, release commit, main-ref push, and GitHub Pages activation code
 - [ ] Publisher backend hosting and `AI_FACTORY_GITHUB_TOKEN` configuration
 - [ ] Authenticated browser-to-backend completion/publish wiring
@@ -79,9 +81,9 @@ Legend: `[x]` implemented, `[-]` partially implemented, `[ ]` not implemented.
 
 ## P4 — end-to-end generated game
 
-- [ ] Theme to idea selection
-- [ ] Planning to generated code
-- [ ] Sandboxed run and test
+- [x] Theme to idea selection (deterministic local planner)
+- [-] Planning to generated code (three tested local genre templates; external model generation pending)
+- [-] Sandboxed run and test (iframe sandbox and static smoke checks; isolated backend runner pending)
 - [ ] Automated repair loop
 - [ ] Windows build
 - [ ] CEO build review

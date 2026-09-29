@@ -77,6 +77,7 @@
         line.handoffs = line.handoffs || [];
         line.topicName = line.topicName || (x.topic && x.topic.name) || "game";
         line.gameType = line.gameType || String(line.title || "").split("·").pop().trim() || "Arcade Score";
+        ensureLinePlan(line);
         if (line.status === "complete") ensurePlayableBuild(line);
       });
       return x;
@@ -197,10 +198,22 @@
 
   function generateIdeas(topic, genre) {
     return IDEA_PATTERNS.map(function (pattern, i) {
-      var quality = 82 + ((i * 7 + topic.length * 3) % 17);
-      var cost = 75 + ((i * 11 + topic.length) % 20);
-      var novelty = 70 + ((i * 13 + topic.length * 5) % 27);
-      var score = Math.round(quality * .45 + cost * .35 + novelty * .20);
+      var metrics = {
+        fun:72+((i*7+topic.length*3)%27),
+        coreLoop:74+((i*5+topic.length*4)%25),
+        costEfficiency:70+((i*11+topic.length)%28),
+        scheduleFit:68+((i*9+topic.length*2)%30),
+        differentiation:66+((i*13+topic.length*5)%32),
+        technicalFeasibility:71+((i*6+topic.length*3)%27),
+        marketability:67+((i*8+topic.length*4)%31),
+        scalability:65+((i*10+topic.length*2)%33),
+        riskSafety:69+((i*4+topic.length*5)%29)
+      };
+      var score = Math.round(
+        metrics.fun*.20+metrics.coreLoop*.15+metrics.costEfficiency*.12+metrics.scheduleFit*.08+
+        metrics.differentiation*.13+metrics.technicalFeasibility*.10+metrics.marketability*.10+
+        metrics.scalability*.06+metrics.riskSafety*.06
+      );
       return {
         id:"idea-"+Date.now()+"-"+i,
         title:topic+" · "+pattern[0],
@@ -209,12 +222,103 @@
         loop:pattern[2],
         genre:genre||"자동선택",
         score:score,
-        quality:quality,
-        cost:cost,
-        novelty:novelty,
+        quality:metrics.fun,
+        cost:metrics.costEfficiency,
+        novelty:metrics.differentiation,
+        metrics:metrics,
+        critiques:[
+          "Creative Director: "+pattern[0]+"의 플레이 판타지와 반복 동기를 강화",
+          "Technical Director: Web 단일 빌드에서 핵심 루프를 먼저 검증",
+          "QA Lead: 3분 안에 규칙 학습·첫 성공·재도전이 가능한지 측정"
+        ],
         status:"candidate"
       };
     }).sort(function (a,b) { return b.score - a.score; });
+  }
+
+  function gameFamily(type) {
+    if (/Tycoon|Management/.test(type)) return "management";
+    if (/Roguelike|Survivor|Extraction|Arcade/.test(type)) return "action";
+    return "strategy";
+  }
+
+  function makeProductionPlan(idea, topic) {
+    var family = gameFamily(idea.type);
+    var variants = {
+      strategy:{
+        fantasy:"불완전한 정보를 읽고 결정적인 수를 설계하는 지휘관",
+        audience:"짧은 세션에서도 생각할 거리를 원하는 전략·퍼즐 플레이어",
+        session:"5–8분",
+        controls:["카드 선택","분석 능력 사용","재시작"],
+        systems:["매 라운드 변경되는 판정 규칙","콤보와 집중력 자원","난이도 상승과 제한 시간"],
+        progression:"정답 연속 성공으로 집중력을 얻고 분석 능력을 해금",
+        win:"12라운드를 제한 시간과 생명 안에 해결",
+        lose:"생명 0 또는 제한 시간 종료",
+        content:"3개 판정 규칙, 12라운드, 분석 능력, 반응형 UI"
+      },
+      action:{
+        fantasy:"위험 지역을 돌파하며 자원을 회수하는 생존 파일럿",
+        audience:"즉각적인 조작과 짧은 성장 루프를 선호하는 액션 플레이어",
+        session:"3–5분",
+        controls:["WASD/방향키 이동","포인터 이동","재시작"],
+        systems:["추적 적 회피","에너지 코어 수집","보호막과 난이도 상승"],
+        progression:"코어 수집으로 점수·속도·보호막이 단계적으로 강화",
+        win:"제한 시간 동안 목표 코어를 수집하고 생존",
+        lose:"적과 충돌해 내구도 0",
+        content:"실시간 캔버스 맵, 적 스폰, 수집물, 보호막, 난이도 곡선"
+      },
+      management:{
+        fantasy:"제한된 자원으로 조직을 성장시키는 운영 책임자",
+        audience:"계획·효율화·숫자 성장에 만족을 느끼는 경영 플레이어",
+        session:"6–10분",
+        controls:["운영 행동 선택","연구/확장 구매","다음 날 진행"],
+        systems:["크레딧·에너지·평판 경제","영구 업그레이드","12일 목표와 랜덤 이벤트"],
+        progression:"연구 배수와 시설 확장으로 일일 자동 수익 증가",
+        win:"12일 종료 시 목표 크레딧과 평판 달성",
+        lose:"에너지·자금 운용 실패로 목표 미달",
+        content:"4개 운영 행동, 3단계 연구, 시설 확장, 사건 로그, 결산"
+      }
+    };
+    var spec = variants[family];
+    return {
+      version:"1.0",
+      family:family,
+      title:idea.title,
+      elevatorPitch:topic+"의 테마를 "+idea.type+" 구조로 압축한 짧지만 완결된 웹게임",
+      playerFantasy:spec.fantasy,
+      audience:spec.audience,
+      session:spec.session,
+      coreLoop:String(idea.loop || "관찰 → 선택 → 결과 → 성장 → 재도전").split(" → "),
+      controls:spec.controls,
+      systems:spec.systems,
+      progression:spec.progression,
+      winCondition:spec.win,
+      loseCondition:spec.lose,
+      contentScope:spec.content,
+      artDirection:"짙은 생산 콘솔 위에 "+topic+"을 상징하는 고대비 네온 색상과 명확한 상태 피드백",
+      audioDirection:"외부 파일 없이도 동작하도록 시각 피드백 우선, 후속 빌드에서 WebAudio 효과음 추가",
+      risks:["주제와 핵심 조작의 연결 약화","첫 30초 규칙 설명 부족","후반 난이도 급상승"],
+      qaCriteria:["첫 입력 후 3초 안에 플레이 시작","모든 승패 상태에서 재시작 가능","모바일 360px와 데스크톱에서 조작 가능","콘솔 오류 0건","완전 오프라인 실행"],
+      taskGraph:[
+        {id:"T1",name:"핵심 루프 사양",depends:[],owner:"Game Designer"},
+        {id:"T2",name:"경제·진행 설계",depends:["T1"],owner:"Systems Designer"},
+        {id:"T3",name:"플레이어 입력·상태 머신",depends:["T1"],owner:"Gameplay Programmer"},
+        {id:"T4",name:"콘텐츠·난이도 곡선",depends:["T2","T3"],owner:"Game Designer"},
+        {id:"T5",name:"통합 HTML5 빌드",depends:["T3","T4"],owner:"Build Engineer"},
+        {id:"T6",name:"브라우저 smoke QA",depends:["T5"],owner:"QA"}
+      ]
+    };
+  }
+
+  function ensureLinePlan(line) {
+    if (!line.plan) {
+      line.plan = makeProductionPlan({
+        title:line.title,
+        type:line.gameType || "Arcade Score",
+        loop:"관찰 → 선택 → 결과 → 성장 → 재도전"
+      }, line.topicName || "game");
+    }
+    return line.plan;
   }
 
   function createLine(idea, automatic) {
@@ -226,6 +330,7 @@
       title:idea.title,
       topicName:state.topic ? state.topic.name : "game",
       gameType:idea.type,
+      plan:makeProductionPlan(idea, state.topic ? state.topic.name : "game"),
       stage:2,
       status:"running",
       autopilot:state.settings.autopilot,
@@ -284,7 +389,32 @@
     return JSON.stringify(String(value == null ? "" : value)).replace(/</g, "\\u003c");
   }
 
-  function buildPlayableGame(line) {
+  function planToMarkdown(line) {
+    var p = ensureLinePlan(line);
+    var taskRows = p.taskGraph.map(function (task) {
+      return "| "+task.id+" | "+task.name+" | "+task.owner+" | "+(task.depends.length ? task.depends.join(", ") : "-")+" |";
+    }).join("\n");
+    return "# "+p.title+" — Game Design Document\n\n"+
+      "- Version: "+p.version+"\n- Game family: "+p.family+"\n- Target session: "+p.session+"\n\n"+
+      "## High concept\n\n"+p.elevatorPitch+"\n\n"+
+      "**Player fantasy:** "+p.playerFantasy+"\n\n**Audience:** "+p.audience+"\n\n"+
+      "## Core loop\n\n"+p.coreLoop.map(function (x, i) { return (i+1)+". "+x; }).join("\n")+"\n\n"+
+      "## Controls\n\n"+p.controls.map(function (x) { return "- "+x; }).join("\n")+"\n\n"+
+      "## Systems\n\n"+p.systems.map(function (x) { return "- "+x; }).join("\n")+"\n\n"+
+      "## Progression and outcome\n\n- Progression: "+p.progression+"\n- Win: "+p.winCondition+"\n- Loss: "+p.loseCondition+"\n\n"+
+      "## Production scope\n\n- Content: "+p.contentScope+"\n- Art: "+p.artDirection+"\n- Audio: "+p.audioDirection+"\n\n"+
+      "## Risks\n\n"+p.risks.map(function (x) { return "- "+x; }).join("\n")+"\n\n"+
+      "## Task graph\n\n| ID | Task | Owner | Dependencies |\n| --- | --- | --- | --- |\n"+taskRows+"\n";
+  }
+
+  function qaToMarkdown(line) {
+    var p = ensureLinePlan(line);
+    return "# "+p.title+" — QA Acceptance\n\n"+p.qaCriteria.map(function (x, i) {
+      return "- [ ] QA-"+(i+1)+" "+x;
+    }).join("\n")+"\n\n## Automated smoke\n\n- [x] Standalone HTML document\n- [x] Start/restart entry point\n- [x] No external runtime dependency\n";
+  }
+
+  function buildStrategyGame(line) {
     var gameTitle = jsonForScript(line.title);
     var topic = jsonForScript(line.topicName);
     var gameType = jsonForScript(line.gameType || "Arcade Score");
@@ -300,48 +430,94 @@
     .game{width:min(760px,100%);padding:24px;border:1px solid var(--line);border-radius:20px;background:rgba(13,20,32,.96);box-shadow:0 30px 80px #0008}h1{margin:4px 0 6px;font-size:clamp(25px,5vw,42px)}.sub{margin:0 0 20px;color:#93a5bb}.hud{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.stat{padding:12px;border:1px solid var(--line);border-radius:12px;background:#0a111c}.stat small,.stat strong{display:block}.stat small{color:#73869d;font-size:10px;text-transform:uppercase;letter-spacing:.12em}.stat strong{margin-top:4px;font-size:21px}.arena{min-height:300px;margin-top:12px;padding:20px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(145deg,#111b2c,#0b111b);text-align:center}.prompt{color:#aebbd0}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:25px 0}.card{min-height:125px;border:1px solid #394b66;border-radius:16px;background:linear-gradient(160deg,#1d2940,#101827);color:white;font-size:38px;font-weight:900;cursor:pointer;transition:.16s transform,.16s border-color}.card:hover{transform:translateY(-4px);border-color:#8c82ff}.card.good{border-color:var(--good);background:#103021}.card.bad{border-color:var(--bad);background:#35151b}.message{min-height:28px;color:#9eacc0}.primary{width:100%;padding:14px;border:0;border-radius:12px;background:linear-gradient(135deg,#8577ff,#5a48ec);color:white;font-weight:900;cursor:pointer}.hidden{display:none}@media(max-width:560px){.hud{grid-template-columns:repeat(2,1fr)}.cards{grid-template-columns:1fr}.card{min-height:72px}}
   </style>
 </head>
-<body>
+<body data-ai-factory-game="v2" data-family="strategy">
   <main class="game">
-    <small id="mode"></small><h1 id="title"></h1><p class="sub">가장 높은 에너지 카드를 빠르게 선택해 콤보를 이어가세요.</p>
-    <section class="hud"><div class="stat"><small>Score</small><strong id="score">0</strong></div><div class="stat"><small>Combo</small><strong id="combo">0</strong></div><div class="stat"><small>Time</small><strong id="time">45</strong></div><div class="stat"><small>Lives</small><strong id="lives">3</strong></div></section>
-    <section class="arena"><p class="prompt" id="prompt">게임을 시작하면 세 카드 중 가장 높은 숫자를 고르세요.</p><div class="cards" id="cards"></div><p class="message" id="message">실제 브라우저에서 실행되는 독립형 HTML5 빌드입니다.</p><button class="primary" id="start">게임 시작</button></section>
+    <small id="mode"></small><h1 id="title"></h1><p class="sub">매 라운드 바뀌는 작전 규칙을 읽고 제한된 집중력을 운용하세요.</p>
+    <section class="hud"><div class="stat"><small>Score</small><strong id="score">0</strong></div><div class="stat"><small>Round</small><strong id="round">0/12</strong></div><div class="stat"><small>Focus</small><strong id="focus">2</strong></div><div class="stat"><small>Lives / Time</small><strong><span id="lives">3</span> / <span id="time">60</span></strong></div></section>
+    <section class="arena"><p class="prompt" id="prompt">높음·낮음·목표 근접 규칙이 교대로 등장합니다.</p><div class="cards" id="cards"></div><p class="message" id="message">분석은 오답 하나를 제거하지만 집중력 1을 소비합니다.</p><div style="display:flex;gap:8px"><button class="primary" id="analyze" style="background:#26334a" disabled>분석 사용</button><button class="primary" id="start">작전 시작</button></div></section>
   </main>
   <script>
     const GAME_TITLE=${gameTitle}; const TOPIC=${topic}; const GAME_TYPE=${gameType};
-    const $=id=>document.getElementById(id); let score=0,combo=0,lives=3,time=45,active=false,timer=null,round=0;
+    const $=id=>document.getElementById(id); let score=0,combo=0,lives=3,time=60,focus=2,active=false,timer=null,round=0,target=0,answer=0;
     $("title").textContent=GAME_TITLE; $("mode").textContent=TOPIC+" · "+GAME_TYPE;
-    function sync(){ $("score").textContent=score; $("combo").textContent=combo; $("lives").textContent=lives; $("time").textContent=time; }
+    function sync(){ $("score").textContent=score; $("round").textContent=round+"/12"; $("focus").textContent=focus; $("lives").textContent=lives; $("time").textContent=time; $("analyze").disabled=!active||focus<1; }
     function makeRound(){
       if(!active)return; round+=1; const values=[]; while(values.length<3){const n=1+Math.floor(Math.random()*(20+round));if(!values.includes(n))values.push(n)}
-      const target=Math.max(...values); $("prompt").textContent="ROUND "+round+" · 가장 높은 에너지를 확보하세요"; const wrap=$("cards"); wrap.innerHTML="";
-      values.sort(()=>Math.random()-.5).forEach(value=>{const b=document.createElement("button");b.className="card";b.textContent=value;b.onclick=()=>choose(value,target,b);wrap.appendChild(b)});
+      const rule=(round-1)%3; target=5+Math.floor(Math.random()*(15+round)); answer=rule===0?Math.max(...values):rule===1?Math.min(...values):values.reduce((a,b)=>Math.abs(b-target)<Math.abs(a-target)?b:a);
+      $("prompt").textContent="ROUND "+round+" · "+(rule===0?"가장 높은 신호 선택":rule===1?"가장 낮은 위험 선택":"목표 "+target+"에 가장 가까운 값 선택"); const wrap=$("cards"); wrap.innerHTML="";
+      values.sort(()=>Math.random()-.5).forEach(value=>{const b=document.createElement("button");b.className="card";b.dataset.value=value;b.textContent=value;b.onclick=()=>choose(value,b);wrap.appendChild(b)});sync();
     }
-    function choose(value,target,button){
+    function choose(value,button){
       if(!active)return; document.querySelectorAll(".card").forEach(x=>x.disabled=true);
-      if(value===target){combo+=1;score+=100+combo*20;button.classList.add("good");$("message").textContent="정확합니다! 콤보 보너스 +"+(100+combo*20)}
-      else{combo=0;lives-=1;button.classList.add("bad");$("message").textContent="위험 선택! 정답은 "+target;if(lives<=0){sync();endGame();return}}
-      sync();setTimeout(makeRound,350);
+      if(value===answer){combo+=1;score+=100+combo*25;if(combo%3===0)focus=Math.min(3,focus+1);button.classList.add("good");$("message").textContent="정확한 판단 · 콤보 "+combo}
+      else{combo=0;lives-=1;button.classList.add("bad");$("message").textContent="오판입니다. 정답은 "+answer}
+      sync();if(lives<=0||round>=12){setTimeout(endGame,400);return}setTimeout(makeRound,400);
     }
-    function startGame(){score=0;combo=0;lives=3;time=45;round=0;active=true;clearInterval(timer);$("start").classList.add("hidden");$("message").textContent="생산라인 빌드 실행 중";sync();makeRound();timer=setInterval(()=>{time-=1;sync();if(time<=0)endGame()},1000)}
-    function endGame(){active=false;clearInterval(timer);$("cards").innerHTML="";$("prompt").textContent="RUN COMPLETE";$("message").textContent="최종 점수 "+score+" · 최고 콤보 "+combo;$("start").textContent="다시 플레이";$("start").classList.remove("hidden")}
-    $("start").onclick=startGame;
+    function analyze(){if(!active||focus<1)return;focus-=1;const wrong=[...document.querySelectorAll(".card")].filter(b=>Number(b.dataset.value)!==answer&&!b.disabled);if(wrong.length){const removed=wrong[Math.floor(Math.random()*wrong.length)];removed.disabled=true;removed.style.opacity=.28}$("message").textContent="분석 완료: 오답 후보를 제거했습니다.";sync()}
+    function startGame(){score=0;combo=0;lives=3;time=60;focus=2;round=0;active=true;clearInterval(timer);$("start").classList.add("hidden");$("message").textContent="판정 규칙을 읽고 작전을 수행하세요.";sync();makeRound();timer=setInterval(()=>{time-=1;sync();if(time<=0)endGame()},1000)}
+    function endGame(){if(!active)return;active=false;clearInterval(timer);$("cards").innerHTML="";const win=round>=12&&lives>0&&time>0;$("prompt").textContent=win?"MISSION COMPLETE":"MISSION FAILED";$("message").textContent="최종 점수 "+score+" · 도달 라운드 "+round;$("start").textContent="다시 플레이";$("start").classList.remove("hidden");sync()}
+    $("start").onclick=startGame; $("analyze").onclick=analyze;
   </script>
 </body>
 </html>`;
   }
 
+  function buildActionGame(line) {
+    var gameTitle = jsonForScript(line.title);
+    var topic = jsonForScript(line.topicName);
+    var gameType = jsonForScript(line.gameType || "Action");
+    return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI Factory Action Game</title><style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:16px;background:radial-gradient(circle at top,#17334a,#060b12 65%);color:#f4f8fc;font-family:system-ui,sans-serif}.game{width:min(900px,100%);padding:20px;border:1px solid #294158;border-radius:20px;background:#09111bdd}h1{margin:4px 0;font-size:clamp(25px,5vw,40px)}.sub{margin:0 0 14px;color:#89a5bb}.hud{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:9px}.stat{padding:10px;border:1px solid #283c50;border-radius:10px;background:#0b1824}.stat small,.stat strong{display:block}.stat small{font-size:9px;letter-spacing:.12em;color:#7894aa}.stat strong{font-size:20px}canvas{width:100%;aspect-ratio:16/9;display:block;border:1px solid #34526b;border-radius:14px;background:#06101a;touch-action:none}.bar{display:flex;gap:8px;align-items:center;margin-top:10px}.bar p{flex:1;margin:0;color:#91aabd;font-size:12px}.bar button{padding:11px 18px;border:0;border-radius:10px;background:#46d6a1;color:#04130e;font-weight:900;cursor:pointer}@media(max-width:560px){.hud{grid-template-columns:repeat(2,1fr)}}
+</style></head><body data-ai-factory-game="v2" data-family="action"><main class="game"><small id="mode"></small><h1 id="title"></h1><p class="sub">코어를 회수하고 추적 드론을 피하세요. WASD·방향키·포인터 이동을 지원합니다.</p><section class="hud"><div class="stat"><small>CORES</small><strong id="score">0 / 15</strong></div><div class="stat"><small>HULL</small><strong id="hull">3</strong></div><div class="stat"><small>SHIELD</small><strong id="shield">0</strong></div><div class="stat"><small>TIME</small><strong id="time">60</strong></div></section><canvas id="game" width="800" height="450"></canvas><div class="bar"><p id="message">초록 코어 15개를 60초 안에 회수하면 임무 성공입니다.</p><button id="start">출격</button></div></main><script>
+const GAME_TITLE=${gameTitle},TOPIC=${topic},GAME_TYPE=${gameType};const $=id=>document.getElementById(id),canvas=$("game"),ctx=canvas.getContext("2d");let player,cores=[],enemies=[],keys={},score=0,hull=3,shield=0,time=60,active=false,last,spawn,timer,raf,pointer=null;$("title").textContent=GAME_TITLE;$("mode").textContent=TOPIC+" · "+GAME_TYPE;
+function sync(){$("score").textContent=score+" / 15";$("hull").textContent=hull;$("shield").textContent=shield;$("time").textContent=time}
+function randomPoint(){return{x:30+Math.random()*740,y:30+Math.random()*390}}
+function startGame(){player={x:400,y:225,r:12,inv:0};cores=[randomPoint(),randomPoint(),randomPoint()];enemies=[{...randomPoint(),r:12,s:55}];keys={};score=0;hull=3;shield=0;time=60;active=true;last=performance.now();spawn=0;clearInterval(timer);cancelAnimationFrame(raf);$("start").textContent="재출격";$("message").textContent="항로가 열렸습니다. 계속 움직이세요.";sync();timer=setInterval(()=>{if(!active)return;time-=1;sync();if(time<=0)endGame(false)},1000);raf=requestAnimationFrame(loop)}
+function hit(a,b,dist){return Math.hypot(a.x-b.x,a.y-b.y)<dist}
+function update(dt){let dx=(keys.ArrowRight||keys.d?1:0)-(keys.ArrowLeft||keys.a?1:0),dy=(keys.ArrowDown||keys.s?1:0)-(keys.ArrowUp||keys.w?1:0);if(pointer){dx=pointer.x-player.x;dy=pointer.y-player.y;if(Math.hypot(dx,dy)<8)pointer=null}const n=Math.hypot(dx,dy)||1;player.x=Math.max(15,Math.min(785,player.x+dx/n*190*dt));player.y=Math.max(15,Math.min(435,player.y+dy/n*190*dt));player.inv=Math.max(0,player.inv-dt);cores.forEach((c,i)=>{if(hit(player,c,20)){cores.splice(i,1);score+=1;if(score%5===0)shield+=1;cores.push(randomPoint());sync();if(score>=15)endGame(true)}});spawn+=dt;if(spawn>Math.max(1.3,3-score*.1)){spawn=0;enemies.push({...randomPoint(),r:11,s:55+score*5})}enemies.forEach(e=>{let x=player.x-e.x,y=player.y-e.y,n=Math.hypot(x,y)||1;e.x+=x/n*e.s*dt;e.y+=y/n*e.s*dt;if(hit(player,e,22)&&player.inv<=0){player.inv=1.2;if(shield>0)shield-=1;else hull-=1;sync();if(hull<=0)endGame(false)}})}
+function draw(){ctx.fillStyle="#06101a";ctx.fillRect(0,0,800,450);ctx.strokeStyle="#10283a";for(let x=0;x<800;x+=40){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,450);ctx.stroke()}for(let y=0;y<450;y+=40){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(800,y);ctx.stroke()}cores.forEach(c=>{ctx.fillStyle="#45e6a3";ctx.beginPath();ctx.arc(c.x,c.y,7,0,7);ctx.fill();ctx.strokeStyle="#45e6a366";ctx.beginPath();ctx.arc(c.x,c.y,14,0,7);ctx.stroke()});enemies.forEach(e=>{ctx.fillStyle="#ff667d";ctx.beginPath();ctx.arc(e.x,e.y,e.r,0,7);ctx.fill()});if(player){ctx.fillStyle=player.inv>0?"#fff":"#78b8ff";ctx.beginPath();ctx.arc(player.x,player.y,player.r,0,7);ctx.fill();if(shield){ctx.strokeStyle="#72f0ff";ctx.beginPath();ctx.arc(player.x,player.y,18,0,7);ctx.stroke()}}}
+function loop(now){if(!active)return;const dt=Math.min(.035,(now-last)/1000);last=now;update(dt);draw();raf=requestAnimationFrame(loop)}function endGame(win){if(!active)return;active=false;clearInterval(timer);cancelAnimationFrame(raf);$("message").textContent=win?"회수 완료! 생존 보너스 "+(hull*100):"임무 실패 · "+score+"개 코어를 회수했습니다.";$("start").textContent="다시 출격"}
+addEventListener("keydown",e=>{keys[e.key]=true});addEventListener("keyup",e=>{keys[e.key]=false});canvas.addEventListener("pointerdown",e=>{const r=canvas.getBoundingClientRect();pointer={x:(e.clientX-r.left)*800/r.width,y:(e.clientY-r.top)*450/r.height}});$("start").onclick=startGame;draw();
+</script></body></html>`;
+  }
+
+  function buildManagementGame(line) {
+    var gameTitle = jsonForScript(line.title);
+    var topic = jsonForScript(line.topicName);
+    var gameType = jsonForScript(line.gameType || "Management");
+    return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI Factory Management Game</title><style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:18px;background:radial-gradient(circle at 20% 0,#293a2c,#090d0a 62%);color:#f4f7f2;font-family:system-ui,sans-serif}.game{width:min(850px,100%);padding:22px;border:1px solid #364b39;border-radius:20px;background:#0e1710ee}h1{margin:4px 0}.sub{color:#8eaa91}.hud{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.stat,.action,.log{padding:12px;border:1px solid #314434;border-radius:11px;background:#111d13}.stat small,.stat strong{display:block}.stat small{font-size:9px;color:#78917b;letter-spacing:.12em}.stat strong{font-size:21px;margin-top:3px}.actions{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:10px}.action{text-align:left;color:#e8f1e8;cursor:pointer}.action:hover{border-color:#74c97c}.action strong,.action small{display:block}.action small{color:#819984;margin-top:4px}.action:disabled{opacity:.4}.log{min-height:108px;margin-top:10px;color:#9db09f;line-height:1.55}.next{width:100%;margin-top:10px;padding:13px;border:0;border-radius:10px;background:#74d780;color:#081109;font-weight:900;cursor:pointer}@media(max-width:560px){.hud,.actions{grid-template-columns:repeat(2,1fr)}}
+</style></head><body data-ai-factory-game="v2" data-family="management"><main class="game"><small id="mode"></small><h1 id="title"></h1><p class="sub">12일 동안 운영·연구·확장의 균형을 잡아 2,000 크레딧과 평판 60을 달성하세요.</p><section class="hud"><div class="stat"><small>DAY</small><strong id="day">1 / 12</strong></div><div class="stat"><small>CREDITS</small><strong id="credits">500</strong></div><div class="stat"><small>ENERGY</small><strong id="energy">5</strong></div><div class="stat"><small>REPUTATION</small><strong id="rep">20</strong></div></section><section class="actions"><button class="action" data-act="contract"><strong>계약 수행</strong><small>에너지 -2 · 수익과 평판</small></button><button class="action" data-act="efficient"><strong>효율 운영</strong><small>에너지 -1 · 안정 수익</small></button><button class="action" data-act="research"><strong>연구 투자</strong><small>비용 300 · 영구 수익 +25%</small></button><button class="action" data-act="expand"><strong>시설 확장</strong><small>비용 450 · 매일 자동수익 +100</small></button></section><div class="log" id="log">운영 계획을 선택하세요. 하루에 최대 2회 행동할 수 있습니다.</div><button class="next" id="next">다음 날</button></main><script>
+const GAME_TITLE=${gameTitle},TOPIC=${topic},GAME_TYPE=${gameType};const $=id=>document.getElementById(id);let day,credits,energy,rep,research,facilities,actions,active;$("title").textContent=GAME_TITLE;$("mode").textContent=TOPIC+" · "+GAME_TYPE;
+function sync(){$("day").textContent=day+" / 12";$("credits").textContent=Math.floor(credits);$("energy").textContent=energy;$("rep").textContent=rep;document.querySelectorAll(".action").forEach(b=>b.disabled=!active||actions>=2)}function note(t){$("log").innerHTML=t+"<br>연구 "+research+"단계 · 시설 "+facilities+"개 · 오늘 행동 "+actions+"/2"}
+function act(type){if(!active||actions>=2)return;let msg="";if(type==="contract"){if(energy<2)return note("에너지가 부족합니다.");energy-=2;let gain=Math.round((180+Math.random()*160)*(1+research*.25));credits+=gain;rep+=6;msg="핵심 계약 성공: +"+gain+" 크레딧, 평판 +6"}if(type==="efficient"){if(energy<1)return note("에너지가 부족합니다.");energy-=1;let gain=Math.round(110*(1+research*.25));credits+=gain;rep+=2;msg="효율 운영: +"+gain+" 크레딧, 평판 +2"}if(type==="research"){if(credits<300)return note("연구 비용 300이 필요합니다.");credits-=300;research+=1;msg="연구 완료: 모든 운영 수익 +25%"}if(type==="expand"){if(credits<450)return note("확장 비용 450이 필요합니다.");credits-=450;facilities+=1;msg="시설 확장: 다음 날부터 자동수익 +100"}actions+=1;note(msg);sync()}
+function nextDay(){if(!active)return;if(day>=12){endGame();return}day+=1;actions=0;energy=Math.min(6,energy+3);credits+=facilities*100;const roll=Math.random();let event="특별한 사건 없이 운영되었습니다.";if(roll<.18){credits=Math.max(0,credits-140);event="장비 고장: -140 크레딧"}else if(roll>.84){credits+=180;rep+=3;event="호평 기사: +180 크레딧, 평판 +3"}note("DAY "+day+" · "+event);sync();if(day===12)$("next").textContent="최종 결산"}
+function startGame(){day=1;credits=500;energy=5;rep=20;research=0;facilities=0;actions=0;active=true;$("next").textContent="다음 날";$("next").onclick=nextDay;note("새 운영 주기가 시작되었습니다.");sync()}function endGame(){active=false;const win=credits>=2000&&rep>=60;note(win?"목표 달성! 지속 가능한 조직을 만들었습니다.":"목표 미달. 2,000 크레딧과 평판 60을 함께 달성해야 합니다.");$("next").textContent="다시 시작";$("next").onclick=startGame;sync()}
+document.querySelectorAll("[data-act]").forEach(b=>b.onclick=()=>act(b.dataset.act));$("next").onclick=nextDay;startGame();
+</script></body></html>`;
+  }
+
+  function buildPlayableGame(line) {
+    var family = ensureLinePlan(line).family;
+    if (family === "action") return buildActionGame(line);
+    if (family === "management") return buildManagementGame(line);
+    return buildStrategyGame(line);
+  }
+
   function ensurePlayableBuild(line) {
-    if (!line.gameFiles || !line.gameFiles["index.html"]) {
-      line.gameFiles = {"index.html":buildPlayableGame(line)};
-    }
+    ensureLinePlan(line);
+    if (!line.gameFiles || !line.gameFiles["index.html"] || !line.build || line.build.version !== "2.1") line.gameFiles = {"index.html":buildPlayableGame(line)};
+    line.gameFiles["GDD.md"] = planToMarkdown(line);
+    line.gameFiles["QA.md"] = qaToMarkdown(line);
     var html = line.gameFiles["index.html"];
-    var smokePassed = /<!doctype html>/i.test(html) && html.indexOf("startGame") !== -1 && html.indexOf('id="cards"') !== -1;
+    var smokePassed = /<!doctype html>/i.test(html) && html.indexOf("startGame") !== -1 && html.indexOf('data-ai-factory-game="v2"') !== -1;
     line.build = {
+      version:"2.1",
       status:smokePassed ? "playable" : "failed",
       smokeTest:smokePassed ? "passed" : "failed",
       createdAt:line.build && line.build.createdAt ? line.build.createdAt : now()
     };
-    if (line.artifacts.indexOf("index.html") === -1) line.artifacts.push("index.html");
+    ["GDD.md","QA.md","index.html"].forEach(function (name) { if (line.artifacts.indexOf(name) === -1) line.artifacts.push(name); });
     return smokePassed;
   }
 
@@ -367,6 +543,47 @@
     anchor.click();
     anchor.remove();
     setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
+  function downloadTextArtifact(lineId, name) {
+    var line = state.lines.find(function (x) { return x.id === lineId; });
+    if (!line) return;
+    ensurePlayableBuild(line);
+    var body = line.gameFiles[name];
+    if (!body) return;
+    var url = URL.createObjectURL(new Blob([body], {type:"text/markdown;charset=utf-8"}));
+    var anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = slugify(line.title)+"-"+name;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
+  function showPlan(lineId) {
+    var line = state.lines.find(function (x) { return x.id === lineId; });
+    if (!line) return;
+    var p = ensureLinePlan(line);
+    var list = function (items) { return '<ul>'+items.map(function (x) { return '<li>'+esc(x)+'</li>'; }).join("")+'</ul>'; };
+    var modal = document.createElement("div");
+    modal.className = "planModal";
+    modal.innerHTML = '<div class="planSheet">'+
+      '<div class="planHead"><div><div class="eyebrow">PRODUCTION GDD · '+esc(p.family.toUpperCase())+'</div><h2>'+esc(p.title)+'</h2><p>'+esc(p.elevatorPitch)+'</p></div><button class="button" data-close-plan>닫기</button></div>'+
+      '<div class="planGrid">'+
+        '<section><h3>플레이 경험</h3><dl><dt>플레이어 판타지</dt><dd>'+esc(p.playerFantasy)+'</dd><dt>대상 플레이어</dt><dd>'+esc(p.audience)+'</dd><dt>세션</dt><dd>'+esc(p.session)+'</dd></dl></section>'+
+        '<section><h3>핵심 루프</h3><ol>'+p.coreLoop.map(function (x) { return '<li>'+esc(x)+'</li>'; }).join("")+'</ol></section>'+
+        '<section><h3>조작과 시스템</h3><h4>Controls</h4>'+list(p.controls)+'<h4>Systems</h4>'+list(p.systems)+'</section>'+
+        '<section><h3>진행과 승패</h3><dl><dt>성장</dt><dd>'+esc(p.progression)+'</dd><dt>승리</dt><dd>'+esc(p.winCondition)+'</dd><dt>패배</dt><dd>'+esc(p.loseCondition)+'</dd></dl></section>'+
+        '<section><h3>콘텐츠·표현 범위</h3><p>'+esc(p.contentScope)+'</p><p><strong>Art</strong> · '+esc(p.artDirection)+'</p><p><strong>Audio</strong> · '+esc(p.audioDirection)+'</p></section>'+
+        '<section><h3>리스크와 QA</h3><h4>Risks</h4>'+list(p.risks)+'<h4>Acceptance</h4>'+list(p.qaCriteria)+'</section>'+
+      '</div><section class="taskGraph"><h3>의존성 작업 그래프</h3>'+p.taskGraph.map(function (task) { return '<div><strong>'+esc(task.id)+' · '+esc(task.name)+'</strong><span>'+esc(task.owner)+' · depends on '+esc(task.depends.join(", ") || "none")+'</span></div>'; }).join("")+'</section>'+
+      '<div class="lineActions"><button class="button primary" data-download-gdd="'+esc(line.id)+'">GDD.md 다운로드</button><button class="button" data-download-qa="'+esc(line.id)+'">QA.md 다운로드</button></div>'+
+    '</div>';
+    document.body.appendChild(modal);
+    modal.querySelector("[data-close-plan]").onclick = function () { modal.remove(); };
+    modal.querySelector("[data-download-gdd]").onclick = function () { downloadTextArtifact(line.id, "GDD.md"); };
+    modal.querySelector("[data-download-qa]").onclick = function () { downloadTextArtifact(line.id, "QA.md"); };
   }
 
   function queueCompletedLine(line) {
@@ -847,11 +1064,15 @@
         '<div class="panelHeader"><div><div class="eyebrow">IDEATION PORTFOLIO</div><h2>AI가 만든 10개 아이디어</h2></div><span class="badge">TOP '+state.settings.autoShortlist+' AUTO-LINES</span></div>'+
         '<div class="ideaGrid">'+
           state.ideas.map(function (i) {
+            var m = i.metrics || {fun:i.quality,coreLoop:i.quality,costEfficiency:i.cost,scheduleFit:i.cost,differentiation:i.novelty,technicalFeasibility:i.cost,marketability:i.quality,scalability:i.novelty,riskSafety:i.cost};
+            var metricLabels = [["재미",m.fun],["핵심루프",m.coreLoop],["비용",m.costEfficiency],["일정",m.scheduleFit],["차별성",m.differentiation],["기술",m.technicalFeasibility],["시장성",m.marketability],["확장성",m.scalability],["리스크",m.riskSafety]];
+            var critiques = i.critiques || ["Creative Director: 플레이 판타지 강화","Technical Director: 핵심 루프 우선 검증","QA Lead: 첫 성공까지의 시간을 측정"];
             return '<div class="idea '+(i.status === "in-production" ? "selected" : "")+'">'+
               '<div class="ideaTop"><span class="ideaScore">'+i.score+'</span><span class="chip">'+(i.status === "in-production" ? "생산중" : "Backlog")+'</span></div>'+
               '<h3>'+esc(i.title)+'</h3>'+
               '<p>'+esc(i.pitch)+'</p>'+
-              '<small>품질 '+i.quality+' · 비용효율 '+i.cost+' · 참신성 '+i.novelty+'</small>'+
+              '<div class="metricGrid">'+metricLabels.map(function (x) { return '<span><small>'+esc(x[0])+'</small><strong>'+esc(x[1])+'</strong></span>'; }).join("")+'</div>'+
+              '<div class="critiqueList">'+critiques.map(function (x) { return '<small>'+esc(x)+'</small>'; }).join("")+'</div>'+
               '<div class="lineActions">'+(i.status !== "in-production" ? '<button class="button primary small" data-start="'+esc(i.id)+'">이 아이디어 제작</button>' : "")+'</div>'+
             '</div>';
           }).join("")+
@@ -885,7 +1106,7 @@
           var cls = idx < line.stage ? "done" : (idx === line.stage ? "current" : "");
           return '<div class="miniStage '+cls+'"><span>'+(idx+1)+'</span><small>'+esc(s[1])+'</small></div>';
         }).join("")+'</div>'+
-        '<div class="lineActions">'+
+        '<div class="lineActions"><button class="button" data-plan="'+esc(line.id)+'">기획서 보기</button>'+
           (line.status === "running" ? '<button class="button" data-auto="'+esc(line.id)+'">'+(line.autopilot ? "자동진행 일시정지" : "자동진행 재개")+'</button><button class="button primary" data-finish="'+esc(line.id)+'">완성까지 즉시 실행</button>' : line.status === "paused" ? '<button class="button primary" data-resume="'+esc(line.id)+'">생산라인 재개</button>' : '<button class="button primary" data-results="1">결과물 보기</button>')+
         '</div>'+
         '<div class="feedbackBox"><input id="fb-'+esc(line.id)+'" placeholder="CEO 수정명령"><button class="button" data-feedback="'+esc(line.id)+'">피드백 반영</button></div>'+
@@ -913,6 +1134,10 @@
       b.onclick = function () { activeTab = "results"; renderView(); };
     });
 
+    v.querySelectorAll("[data-plan]").forEach(function (b) {
+      b.onclick = function () { showPlan(b.getAttribute("data-plan")); };
+    });
+
     v.querySelectorAll("[data-feedback]").forEach(function (b) {
       b.onclick = function () {
         var id = b.getAttribute("data-feedback");
@@ -933,7 +1158,7 @@
         '<div class="panelHeader"><div><div class="eyebrow">RELEASE CANDIDATE</div><h2>'+esc(review.title)+'</h2></div><span class="badge">'+esc(review.status.toUpperCase())+'</span></div>'+
         '<div class="reviewFacts"><span>빌드 <strong>PLAYABLE HTML5</strong></span><span>QA <strong>'+esc(review.qaStatus.toUpperCase())+'</strong></span><span>GitHub 게시 <strong>BACKEND OFFLINE</strong></span></div>'+
         '<p class="muted">'+esc(review.createdAt)+' · 저장소 '+esc(review.repository)+'</p>'+
-        '<div class="lineActions"><button class="button primary" data-play="'+esc(review.lineId)+'">게임 테스트 실행</button></div>'+
+        '<div class="lineActions"><button class="button" data-plan="'+esc(review.lineId)+'">기획서 보기</button><button class="button primary" data-play="'+esc(review.lineId)+'">게임 테스트 실행</button></div>'+
         (review.status === "pending" ? '<div class="feedbackBox"><input id="revision-'+esc(review.id)+'" placeholder="수정이 필요하면 지시를 입력"><button class="button" data-revise="'+esc(review.id)+'">수정 요청</button><button class="button primary" data-approve="'+esc(review.id)+'">승인</button></div>' : '')+
       '</div>';
     }).join("")+'</div>';
@@ -946,6 +1171,9 @@
     });
     v.querySelectorAll("[data-play]").forEach(function (b) {
       b.onclick = function () { openPlayableGame(b.getAttribute("data-play")); };
+    });
+    v.querySelectorAll("[data-plan]").forEach(function (b) {
+      b.onclick = function () { showPlan(b.getAttribute("data-plan")); };
     });
   }
 
@@ -968,7 +1196,7 @@
         '<div class="panelHeader"><div><div class="eyebrow">PLAYABLE DELIVERY</div><h2>'+esc(publication.repository || line.title)+'</h2></div><span class="badge '+(isLive ? "liveBadge" : "offlineBadge")+'">'+(isLive ? "PAGES LIVE" : hasBuild ? "LOCAL PLAYABLE" : "BUILD FAILED")+'</span></div>'+
         '<div class="artifactMini"><strong>Standalone HTML5 Build</strong><small>index.html · browser smoke '+esc(line.build.smokeTest)+' · '+line.artifacts.length+' artifacts</small></div>'+
         '<div class="resultLinks">'+
-          (hasBuild ? '<button class="button primary" data-play="'+esc(line.id)+'">브라우저에서 실행</button><button class="button" data-download="'+esc(line.id)+'">HTML 게임 다운로드</button>' : '<button class="button" disabled>빌드 실패</button>')+
+          (hasBuild ? '<button class="button primary" data-play="'+esc(line.id)+'">브라우저에서 실행</button><button class="button" data-plan="'+esc(line.id)+'">기획서 보기</button><button class="button" data-download="'+esc(line.id)+'">HTML 게임 다운로드</button><button class="button" data-gdd="'+esc(line.id)+'">GDD 다운로드</button>' : '<button class="button" disabled>빌드 실패</button>')+
           (isLive ? '<a class="button" href="'+esc(publication.repositoryUrl)+'" target="_blank" rel="noopener">GitHub 저장소 ↗</a><a class="button primary" href="'+esc(publication.pagesUrl)+'" target="_blank" rel="noopener">GitHub Pages 실행 ↗</a>' : '<button class="button" disabled>저장소 미생성</button><button class="button" disabled>Pages 미배포</button>')+
         '</div>'+
         (!isLive ? '<div class="expectedUrls"><small>배포 예정 저장소</small><code>'+esc(publication.repositoryUrl || "-")+'</code><small>배포 예정 Pages</small><code>'+esc(publication.pagesUrl || "-")+'</code></div>' : '')+
@@ -980,6 +1208,12 @@
     });
     v.querySelectorAll("[data-download]").forEach(function (b) {
       b.onclick = function () { downloadPlayableGame(b.getAttribute("data-download")); };
+    });
+    v.querySelectorAll("[data-plan]").forEach(function (b) {
+      b.onclick = function () { showPlan(b.getAttribute("data-plan")); };
+    });
+    v.querySelectorAll("[data-gdd]").forEach(function (b) {
+      b.onclick = function () { downloadTextArtifact(b.getAttribute("data-gdd"), "GDD.md"); };
     });
     save();
   }
