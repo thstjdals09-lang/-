@@ -3,6 +3,7 @@
 import {
   STATE_VERSION, createState, createProject, tickFactory, tickLine, fastForward, startBacklogIdea, addFeedback,
   approveReview, requestRevision, setLineStatus, employeeFromCatalog, addLog, slugify,
+  deleteLine, deleteProject, deleteIdea, clearLogs,
 } from "./engine.js";
 import { buildGame, loadGameTemplates } from "./games.js";
 import { gddMarkdown, qaMarkdown } from "./artifacts.js";
@@ -221,7 +222,42 @@ function commit(opts = {}) {
   else renderView();
 }
 
+function confirmLineDelete(id) {
+  const l = lineById(id);
+  return !!l && confirm("'" + l.title + "' 생산라인을 삭제할까요?\n작업·빌드·기록이 지워지고, 아이디어는 Backlog로 돌아갑니다.\n(이미 GitHub에 올라간 저장소는 그대로 남습니다.)");
+}
+function confirmProjectDelete(id) {
+  const p = app.state.projects.find((x) => x.id === id);
+  const n = app.state.lines.filter((l) => l.projectId === id).length;
+  return !!p && confirm("주제 '" + p.topic + "'를 삭제할까요?\n아이디어 전부와 생산라인 " + n + "개가 함께 삭제됩니다.");
+}
+function afterProjectDelete(id) {
+  if (app.ui.projectId === id) app.ui.projectId = null;
+}
+
 const actions = {
+  "line-delete"(id) {
+    if (!confirmLineDelete(id)) return;
+    deleteLine(app.state, id, app.ctx);
+    app.ui.lineId = null;
+    commit();
+  },
+  "project-delete"(id) {
+    if (!confirmProjectDelete(id)) return;
+    deleteProject(app.state, id, app.ctx);
+    afterProjectDelete(id);
+    commit();
+  },
+  "idea-delete"(id) {
+    const res = deleteIdea(app.state, id, app.ctx);
+    if (!res.ok && res.reason === "in_production") alert("생산 중인 아이디어입니다. 생산라인을 먼저 삭제하세요.");
+    commit();
+  },
+  "logs-clear"() {
+    if (!confirm("생산 로그를 모두 비울까요?")) return;
+    clearLogs(app.state);
+    commit();
+  },
   tab(id) {
     app.ui.tab = id; app.ui.editingTopic = false; app.ui.flash = null; commit(); window.scrollTo(0, 0);
     if (id === "account" && isRemote()) refreshAccount().then(() => renderView());
@@ -341,6 +377,23 @@ const actions = {
 
 // Backend-mode overrides: the server Leader owns production state.
 const remoteActions = {
+  "line-delete"(id) {
+    if (!confirmLineDelete(id)) return;
+    app.ui.lineId = null;
+    remote(() => api.deleteLine(id).catch((err) => { if (err.status === 409) alert("AI가 이 라인을 작업 중입니다. 잠시 후 다시 시도하세요."); else throw err; }));
+  },
+  "project-delete"(id) {
+    if (!confirmProjectDelete(id)) return;
+    afterProjectDelete(id);
+    remote(() => api.deleteProject(id));
+  },
+  "idea-delete"(id) {
+    remote(() => api.deleteIdea(id).catch((err) => { if (err.status === 409) alert("생산 중인 아이디어입니다. 생산라인을 먼저 삭제하세요."); else throw err; }));
+  },
+  "logs-clear"() {
+    if (!confirm("생산 로그를 모두 비울까요?")) return;
+    remote(() => api.clearLogs());
+  },
   "build-idea"(id) {
     remote(async () => {
       try {

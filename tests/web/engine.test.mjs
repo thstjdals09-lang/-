@@ -132,3 +132,20 @@ test("a team without vision AI substitutes text QA instead of blocking", () => {
   assert.ok(state.logs.some((l) => l.type === "SUBSTITUTE"));
   assert.equal(line.stages.vertical.tasks.find((t) => t.id === "visualqa").substituted, "vision");
 });
+
+test("deleting a line, an idea and a whole topic", async () => {
+  const { deleteLine, deleteIdea, deleteProject, clearLogs } = await import("../../docs/js/engine.js");
+  const { ctx, state } = factory();
+  const project = createProject(state, { topic: "홀덤" }, ctx);
+  const line = state.lines[0];
+  fastForward(state, line, ctx);
+  assert.ok(state.reviews.some((r) => r.lineId === line.id));
+  assert.equal(deleteLine(state, line.id, ctx).ok, true);
+  assert.ok(!state.lines.includes(line) && !state.reviews.some((r) => r.lineId === line.id));
+  assert.equal(state.ideas.find((i) => i.id === line.ideaId).status, "backlog");
+  assert.equal(deleteIdea(state, state.lines[0].ideaId, ctx).reason, "in_production");
+  assert.equal(deleteIdea(state, line.ideaId, ctx).ok, true);
+  assert.equal(deleteProject(state, project.id, ctx).lines, 2);
+  assert.equal(state.projects.length + state.ideas.length + state.lines.length, 0);
+  assert.ok(clearLogs(state) > 0 && state.logs.length === 0);
+});

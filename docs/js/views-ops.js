@@ -71,7 +71,8 @@ export function logs(app) {
   const q = (app.ui.logQuery || "").toLowerCase();
   const rows = state.logs.filter((l) => (type === "ALL" || l.type === type) && (!lineId || l.lineId === lineId) && (!q || l.text.toLowerCase().includes(q)));
   return (
-    '<section class="panel"><div class="panelHead"><div><div class="eyebrow">FACTORY STREAM</div><h2>생산 로그</h2></div><span class="chip">' + rows.length + " / " + state.logs.length + "</span></div>" +
+    '<section class="panel"><div class="panelHead"><div><div class="eyebrow">FACTORY STREAM</div><h2>생산 로그</h2></div><div class="actions"><span class="chip">' + rows.length + " / " + state.logs.length + "</span>" +
+    (state.logs.length ? '<button class="btn danger small" data-action="logs-clear">로그 비우기</button>' : "") + "</div></div>" +
     '<div class="filters">' + ["ALL"].concat(types).map((t) => '<button class="' + (t === type ? "on" : "") + '" data-action="log-type" data-id="' + esc(t) + '">' + esc(t) + "</button>").join("") + "</div>" +
     '<div class="formRow"><label>생산라인<select data-change="log-line"><option value="">전체</option>' + state.lines.map((l) => '<option value="' + esc(l.id) + '"' + (l.id === lineId ? " selected" : "") + ">" + esc(l.title) + "</option>").join("") + "</select></label>" +
     '<label>검색<input data-change="log-query" value="' + esc(app.ui.logQuery || "") + '" placeholder="텍스트 검색"></label></div>' +

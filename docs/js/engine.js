@@ -770,3 +770,43 @@ export function quotaSummary(employee) {
   const r = remaining(employee);
   return { remaining: r, unlimited: r === Infinity };
 }
+
+// ---------- deletion ----------
+
+export function deleteLine(state, lineId, ctx, { ideaBackToBacklog = true } = {}) {
+  const line = state.lines.find((l) => l.id === lineId);
+  if (!line) return { ok: false, reason: "not_found" };
+  state.lines = state.lines.filter((l) => l.id !== lineId);
+  state.reviews = state.reviews.filter((r) => r.lineId !== lineId);
+  state.logs = state.logs.filter((l) => l.lineId !== lineId);
+  const idea = state.ideas.find((i) => i.id === line.ideaId);
+  if (idea && ideaBackToBacklog) idea.status = "backlog";
+  addLog(state, ctx, "DELETED", line.title + " 생산라인 삭제" + (ideaBackToBacklog ? " (아이디어는 Backlog로 이동)" : ""));
+  return { ok: true };
+}
+
+export function deleteProject(state, projectId, ctx) {
+  const project = state.projects.find((p) => p.id === projectId);
+  if (!project) return { ok: false, reason: "not_found" };
+  const lines = state.lines.filter((l) => l.projectId === projectId);
+  for (const line of lines) deleteLine(state, line.id, ctx, { ideaBackToBacklog: false });
+  state.ideas = state.ideas.filter((i) => i.projectId !== projectId);
+  state.projects = state.projects.filter((p) => p.id !== projectId);
+  addLog(state, ctx, "DELETED", "주제 '" + project.topic + "' 삭제 · 생산라인 " + lines.length + "개 포함");
+  return { ok: true, lines: lines.length };
+}
+
+export function deleteIdea(state, ideaId, ctx) {
+  const idea = state.ideas.find((i) => i.id === ideaId);
+  if (!idea) return { ok: false, reason: "not_found" };
+  if (state.lines.some((l) => l.ideaId === ideaId)) return { ok: false, reason: "in_production" };
+  state.ideas = state.ideas.filter((i) => i.id !== ideaId);
+  addLog(state, ctx, "DELETED", "아이디어 '" + idea.title + "' 삭제");
+  return { ok: true };
+}
+
+export function clearLogs(state) {
+  const n = state.logs.length;
+  state.logs = [];
+  return n;
+}

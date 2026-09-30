@@ -26,6 +26,7 @@ from .ideation import generate_ideas, slugify
 from .github_sync import GitHubSync, GitHubSyncError, RepoRef, repo_name
 from .pages_verifier import PagesVerifier
 from .workspace import LineWorkspace, WorkspaceError
+from ..account import remove_tree
 from ..github_publisher import GitHubAPIError, GitHubClient
 
 FALLBACK_KIND = {"vision": "qa", "image": "design", "audio": "design"}
@@ -52,6 +53,10 @@ def workspace_root(base: Path, user_id: str, line_id: str) -> Path:
 
 class CapacityError(RuntimeError):
     pass
+
+
+class IdeaInProduction(RuntimeError):
+    """The idea has a production line; delete the line first."""
 
 
 class LineBusy(RuntimeError):
@@ -689,7 +694,7 @@ class Factory:
     def _tick_line(self, conn, user_id, line_id) -> dict:
         line = conn.execute("SELECT * FROM production_lines WHERE id=? AND user_id=?", (line_id, user_id)).fetchone()
         if line is None:
-            raise KeyError("line not found")
+            return {"status": "deleted", "executed": 0}  # removed while queued for a tick
         if line["status"] != "running":
             return {"status": line["status"], "executed": 0}
         s = self.user_settings(conn, user_id)
@@ -770,6 +775,51 @@ class Factory:
             conn.execute("UPDATE production_lines SET status='running' WHERE id=?", (line_id,))
         self.log(conn, user_id, "CEO FEEDBACK", f"{line['title']} · {text} → {stage_def['name']} task로 편성", line_id)
         return fb_id
+
+    # ------------------------------------------------------------------ deletion
+
+    def delete_line(self, conn, user_id, line_id, *, idea_back_to_backlog: bool = True) -> dict:
+        """Stops and removes a line: tasks, builds, reviews, logs and its local game repository.
+        Repositories already pushed to the user's GitHub are left untouched."""
+        lock = self._locked(line_id)
+        try:
+            line = conn.execute("SELECT * FROM production_lines WHERE id=? AND user_id=?", (line_id, user_id)).fetchone()
+            if line is None:
+                raise KeyError("line not found")
+            conn.execute("DELETE FROM production_lines WHERE id=?", (line_id,))  # cascades to the whole line
+            conn.execute("DELETE FROM factory_logs WHERE line_id=?", (line_id,))
+            if idea_back_to_backlog:
+                conn.execute("UPDATE ideas SET status='backlog' WHERE id=?", (line["idea_id"],))
+            self.log(conn, user_id, "DELETED", f"{line['title']} 생산라인 삭제 (아이디어는 Backlog로 이동)" if idea_back_to_backlog else f"{line['title']} 생산라인 삭제")
+            conn.commit()
+            root = self.workspace(user_id, line_id).root
+            remove_tree(root)
+            if root.parent.exists() and not any(root.parent.iterdir()):
+                root.parent.rmdir()
+            return {"deleted": line_id, "title": line["title"]}
+        finally:
+            lock.release()
+
+    def delete_project(self, conn, user_id, project_id) -> dict:
+        project = conn.execute("SELECT * FROM projects WHERE id=? AND user_id=?", (project_id, user_id)).fetchone()
+        if project is None:
+            raise KeyError("project not found")
+        lines = [r["id"] for r in conn.execute("SELECT id FROM production_lines WHERE project_id=?", (project_id,))]
+        for line_id in lines:
+            self.delete_line(conn, user_id, line_id, idea_back_to_backlog=False)
+        conn.execute("DELETE FROM projects WHERE id=?", (project_id,))  # cascades to ideas
+        self.log(conn, user_id, "DELETED", f"주제 '{project['topic']}' 삭제 · 생산라인 {len(lines)}개 포함")
+        return {"deleted": project_id, "lines": len(lines)}
+
+    def delete_idea(self, conn, user_id, idea_id) -> dict:
+        idea = conn.execute("SELECT i.*, p.user_id FROM ideas i JOIN projects p ON p.id=i.project_id WHERE i.id=?", (idea_id,)).fetchone()
+        if idea is None or idea["user_id"] != user_id:
+            raise KeyError("idea not found")
+        if conn.execute("SELECT 1 FROM production_lines WHERE idea_id=?", (idea_id,)).fetchone():
+            raise IdeaInProduction(idea_id)
+        conn.execute("DELETE FROM ideas WHERE id=?", (idea_id,))
+        self.log(conn, user_id, "DELETED", f"아이디어 '{idea['title']}' 삭제")
+        return {"deleted": idea_id}
 
     def _locked(self, line_id):
         lock = self.line_lock(line_id)

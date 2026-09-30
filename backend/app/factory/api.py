@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from .. import db
 from ..auth import User, csrf_guard, current_user
 from ..connections import row_to_out
-from .leader import DEFAULT_USER_SETTINGS, CapacityError, Factory, LineBusy
+from .leader import DEFAULT_USER_SETTINGS, CapacityError, Factory, IdeaInProduction, LineBusy
 
 router = APIRouter(tags=["factory"], dependencies=[Depends(csrf_guard)])
 
@@ -261,6 +261,45 @@ def feedback(line_id: str, payload: TextIn, request: Request, user: User = Depen
 
 
 # ---------------------------------------------------------------- reviews / builds / logs
+
+@router.delete("/lines/{line_id}")
+def delete_line(line_id: str, request: Request, user: User = Depends(current_user)) -> dict:
+    with db.transaction() as conn:
+        _owned_line(conn, user.id, line_id)
+        try:
+            return factory(request).delete_line(conn, user.id, line_id)
+        except LineBusy as exc:
+            raise HTTPException(status_code=409, detail="line_busy") from exc
+
+
+@router.delete("/projects/{project_id}")
+def delete_project(project_id: str, request: Request, user: User = Depends(current_user)) -> dict:
+    with db.transaction() as conn:
+        try:
+            return factory(request).delete_project(conn, user.id, project_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="project_not_found") from exc
+        except LineBusy as exc:
+            raise HTTPException(status_code=409, detail="line_busy") from exc
+
+
+@router.delete("/ideas/{idea_id}")
+def delete_idea(idea_id: str, request: Request, user: User = Depends(current_user)) -> dict:
+    with db.transaction() as conn:
+        try:
+            return factory(request).delete_idea(conn, user.id, idea_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="idea_not_found") from exc
+        except IdeaInProduction as exc:
+            raise HTTPException(status_code=409, detail="idea_in_production") from exc
+
+
+@router.delete("/logs")
+def clear_logs(user: User = Depends(current_user)) -> dict:
+    with db.transaction() as conn:
+        n = conn.execute("DELETE FROM factory_logs WHERE user_id=?", (user.id,)).rowcount
+        return {"deleted": n}
+
 
 @router.get("/reviews")
 def list_reviews(user: User = Depends(current_user)) -> list[dict]:

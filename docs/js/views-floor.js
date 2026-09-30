@@ -149,7 +149,10 @@ export function ideas(app) {
       : "") +
     '<div class="metrics">' + criteria.map((c) => '<div><small>' + esc(c.label) + "</small>" + meter(i.metrics[c.id], { tone: i.metrics[c.id] >= 80 ? "good" : i.metrics[c.id] >= 65 ? "info" : "warn" }) + "<b>" + i.metrics[c.id] + "</b></div>").join("") + "</div>" +
     '<ul class="reviews">' + i.reviews.map((r) => "<li><strong>" + esc(r.role) + "</strong>" + (r.reviewer ? ' <span class="muted">(' + esc(r.reviewer) + ")</span>" : "") + " " + esc(r.verdict) + " (" + r.score + ") · " + esc(r.note) + "</li>").join("") + "</ul>" +
-    (i.status === "backlog" || i.status === "candidate" ? '<button class="btn primary small" data-action="build-idea" data-id="' + esc(i.id) + '">이 아이디어 제작</button>' : "") +
+    (i.status === "backlog" || i.status === "candidate"
+      ? '<div class="actions"><button class="btn primary small" data-action="build-idea" data-id="' + esc(i.id) + '">이 아이디어 제작</button>' +
+        '<button class="btn danger small" data-action="idea-delete" data-id="' + esc(i.id) + '">삭제</button></div>'
+      : "") +
     "</article>";
 
   const shortlisted = list.filter((i) => i.status !== "backlog" && i.status !== "candidate");
@@ -159,6 +162,7 @@ export function ideas(app) {
       ? '<div class="segmented">' + state.projects.map((p) => '<button class="' + (p.id === project.id ? "on" : "") + '" data-action="project" data-id="' + esc(p.id) + '">' + esc(p.topic) + "</button>").join("") + "</div>"
       : "") +
     '<section class="panel"><div class="panelHead"><div><div class="eyebrow">IDEATION ROOM · ' + esc(project.topic) + "</div><h2>자동 Shortlist</h2></div>" +
+    '<button class="btn danger small" data-action="project-delete" data-id="' + esc(project.id) + '">이 주제 삭제</button>' +
     '<span class="chip">가중치: ' + criteria.map((c) => esc(c.label) + " " + Math.round(c.weight * 100) + "%").join(" · ") + "</span></div>" +
     '<div class="portfolioTasks">' + project.portfolio.flatMap((s) => s.tasks).map((t) => '<span class="chip">' + esc(t.name) + " → " + esc(t.assignee) + "</span>").join("") + "</div>" +
     '<div class="ideaGrid">' + shortlisted.map(card).join("") + "</div></section>" +
@@ -249,6 +253,7 @@ function lineDetail(line, app) {
           ? '<button class="btn primary" data-action="tab" data-id="review">CEO Review로 이동</button>'
           : "") +
     '<button class="btn" data-action="gdd" data-id="' + esc(line.id) + '">GDD</button>' +
+    '<button class="btn danger" data-action="line-delete" data-id="' + esc(line.id) + '">라인 삭제</button>' +
     (line.builds.length ? '<button class="btn" data-action="play" data-id="' + esc(line.id) + '">최신 빌드 실행</button>' : "");
 
   const stageTabs =

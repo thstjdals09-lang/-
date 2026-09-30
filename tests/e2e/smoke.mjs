@@ -12,6 +12,8 @@ const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/cs
 
 const server = createServer(async (req, res) => {
   const path = decodeURIComponent(new URL(req.url, "http://x").pathname);
+  // the preview test never follows the live server address committed by start-public.cmd
+  if (path.endsWith("/backend.json")) { res.writeHead(200, { "Content-Type": "application/json" }).end('{"url": null}'); return; }
   const file = normalize(join(docs, path.endsWith("/") ? path + "index.html" : path));
   if (!file.startsWith(docs)) { res.writeHead(403).end(); return; }
   try {
@@ -35,6 +37,7 @@ async function run(viewport, label) {
   page = await browser.newPage({ viewport });
   page.on("pageerror", (e) => errors.push(label + " pageerror: " + e.message));
   page.on("console", (m) => { if (m.type() === "error") errors.push(label + " console: " + m.text()); });
+  page.on("dialog", (d) => d.accept());
   await page.goto(url);
   // without a running server the link must say so instead of faking a login
   await page.waitForSelector(".loginCard .notice");
@@ -88,6 +91,15 @@ async function run(viewport, label) {
   await page.locator(".nav").getByRole("button", { name: "설정" }).click();
   await page.locator(".nav").getByRole("button", { name: "결과물" }).click();
   check((await page.locator(".result").count()) >= 1, label + ": completed build should appear in results");
+
+  // delete unneeded work: one line, then the whole topic
+  await page.locator(".nav").getByRole("button", { name: /생산라인/ }).click();
+  const before = await page.locator(".lineItem").count();
+  await page.getByRole("button", { name: "라인 삭제" }).click();
+  check((await page.locator(".lineItem").count()) === before - 1, label + ": line deleted");
+  await page.locator(".nav").getByRole("button", { name: "아이디어" }).click();
+  await page.getByRole("button", { name: "이 주제 삭제" }).click();
+  check(await page.getByText("먼저 대시보드에서 주제를 입력하세요").isVisible(), label + ": topic deleted");
 
   const stored = await page.evaluate(() => JSON.stringify(localStorage));
   check(!/api[_-]?key"\s*:\s*"[^"]/i.test(stored), label + ": localStorage must not hold API keys");

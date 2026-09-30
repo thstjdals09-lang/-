@@ -92,6 +92,11 @@ try {
   if (shots) await page.screenshot({ path: join(shots, "backend-account.png"), fullPage: true });
   await page.locator(".nav").getByRole("button", { name: "로그" }).click();
   check((await page.locator(".logList li").count()) > 10, "server logs should be listed");
+  // delete an unneeded line on the server
+  await page.locator(".nav").getByRole("button", { name: /생산라인/ }).click();
+  const linesBefore = await page.locator(".lineItem").count();
+  await page.getByRole("button", { name: "라인 삭제" }).click();
+  await page.waitForFunction((n) => document.querySelectorAll(".lineItem").length === n - 1, linesBefore, { timeout: 30000 });
   await page.locator(".accountChip").click();
   await page.getByRole("button", { name: "로그아웃", exact: true }).click();
   await page.waitForSelector('form[data-form="password-login"]');
