@@ -266,6 +266,24 @@ MIGRATIONS: list[str] = [
     ALTER TABLE tasks ADD COLUMN worker_name TEXT;
     ALTER TABLE tasks ADD COLUMN reviewer_name TEXT;
     """,
+    # 5 — runtime QA results/screenshots on builds, and GitHub publications per line.
+    """
+    ALTER TABLE builds ADD COLUMN runtime_status TEXT;
+    ALTER TABLE builds ADD COLUMN screenshot TEXT;
+    CREATE TABLE publications (
+        id TEXT PRIMARY KEY,
+        line_id TEXT NOT NULL REFERENCES production_lines(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        status TEXT NOT NULL,
+        repository TEXT,
+        repository_url TEXT,
+        pages_url TEXT,
+        commit_sha TEXT,
+        detail TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX idx_publications_line ON publications(line_id, created_at);
+    """,
 ]
 
 

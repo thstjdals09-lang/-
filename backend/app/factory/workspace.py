@@ -108,14 +108,21 @@ class LineWorkspace:
         self._git("branch", "-D", branch)
         return TaskCommit(branch=branch, sha=sha, merged_sha=merged)
 
-    def commit_on_main(self, files: dict[str, str], message: str, author: str) -> str:
+    def commit_on_main(self, files: dict[str, str | bytes], message: str, author: str) -> str:
         for rel, content in files.items():
             target = _inside(self.repo, rel)
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content, encoding="utf-8")
+            if isinstance(content, bytes):
+                target.write_bytes(content)
+            else:
+                target.write_text(content, encoding="utf-8")
         self._git("add", "-A")
         self._git("commit", "-q", "--allow-empty", "-m", message, author=author)
         return self._git("rev-parse", "HEAD")
+
+    def read_bytes(self, rel: str) -> bytes | None:
+        path = self.repo / _safe_relpath(rel)
+        return path.read_bytes() if path.is_file() else None
 
     def read(self, rel: str) -> str | None:
         path = self.repo / _safe_relpath(rel)

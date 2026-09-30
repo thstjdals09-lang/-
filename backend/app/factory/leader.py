@@ -20,13 +20,14 @@ from pathlib import Path
 from .. import catalog, db, routing, vault
 from ..connections import next_reset
 from ..providers import AdapterUnavailable, build_adapter
-from . import games
+from . import games, runtime_qa
 from .executor import SIM_ID, SIM_NAME, AllProvidersFailed, TaskContext, build_prompt, extract_game, qa_verdict, run_with_failover, simulate, to_file_content
 from .ideation import generate_ideas, slugify
 from .workspace import LineWorkspace
 
 FALLBACK_KIND = {"vision": "qa", "image": "design", "audio": "design"}
 GAME_PATH = "game/index.html"  # the canonical, always-playable game on main
+MAX_RUNTIME_FIXES = 2
 COOLDOWN = {"rate_limited": 45, "transient": 10, "unknown": 5}
 DEFAULT_USER_SETTINGS = {"policy": "cheapest_viable_quality", "max_parallel": 3, "auto_shortlist": 3, "workers_per_line": 3}
 
@@ -280,11 +281,16 @@ class Factory:
             "SELECT a.path, a.content FROM task_dependencies d JOIN artifacts a ON a.task_id=d.depends_on WHERE d.task_id=?", (task["id"],)
         ).fetchall()
         feedback = [r["text"] for r in conn.execute("SELECT text FROM feedback WHERE line_id=? ORDER BY created_at", (line["id"],)).fetchall()]
+        deps = [(r["path"], r["content"]) for r in deps]
+        if task["task_key"].startswith("runtime-fix"):
+            qa = conn.execute("SELECT path, content FROM artifacts WHERE line_id=? AND path LIKE 'qa/runtime-%' ORDER BY id DESC LIMIT 1", (line["id"],)).fetchone()
+            if qa:
+                deps.append((qa["path"], qa["content"]))
         return TaskContext(
             line_title=line["title"], topic=line["project_slug"], game_type=line["game_type"], family=line["family"], pitch=idea["pitch"],
             loop=json.loads(idea["loop"]), platform=idea["platform"] or "Web", stage_name=stage_def["name"], stage_summary=stage_def.get("summary", ""),
             task_name=task["name"], role=task["role"], kind=task["kind"], artifact=task["artifact"] or "notes.md",
-            dependencies={r["path"]: r["content"] or "" for r in deps}, feedback=feedback,
+            dependencies={path: content or "" for path, content in deps}, feedback=feedback,
         )
 
     def _spawn_repair(self, conn, stage_row, task):
@@ -313,7 +319,7 @@ class Factory:
         return html if html and games.smoke_test(html)["passed"] else self._template_game(line)
 
     def _is_game_task(self, stage_def, task) -> bool:
-        if task["task_key"].startswith("ceo-") or (task["repair_of"] and task["kind"] == "debugging"):
+        if task["task_key"].startswith(("ceo-", "runtime-fix")) or (task["repair_of"] and task["kind"] == "debugging"):
             return True
         return any(t["id"] == task["task_key"] and t.get("game") for t in stage_def["tasks"])
 
@@ -390,26 +396,61 @@ class Factory:
             self._spawn_repair(conn, stage_row, task)
 
     def _complete_stage(self, conn, user_id, line, stage_def, stage_row):
-        conn.execute("UPDATE stages SET status='completed', qa_status='passed', completed_at=? WHERE id=?", (_iso(), stage_row["id"]))
-        self.log(conn, user_id, "STAGE COMPLETE", f"{line['title']} · {stage_def['name']} 통과", line["id"])
         if stage_def.get("build"):
             ws = self.workspace(user_id, line["id"])
             ws.ensure(line["title"])
             html = self.current_game(ws, line)
             smoke = games.smoke_test(html)
-            sha = ws.commit_on_main({f"builds/v{stage_def['build']}/index.html": html}, f"build: v{stage_def['build']} ({stage_def['id']})", "Build Engineer")
+            runtime = runtime_qa.run(html) if smoke["passed"] else {"status": "failed", "checks": [], "errors": ["static smoke failed"], "screenshot": None}
+            if runtime["status"] == "failed":
+                if self._runtime_repair(conn, user_id, line, stage_def, stage_row, runtime):
+                    return  # stage stays open until the repair task passes the gate
+                html = self._template_game(line)
+                ws.commit_on_main({GAME_PATH: html}, "revert: restore the safe template game after failed runtime QA", "AI Factory Leader")
+                self.log(conn, user_id, "RUNTIME REVERT", f"{line['title']} · 자동 수정 {MAX_RUNTIME_FIXES}회 실패 → 안전한 템플릿 게임으로 복구", line["id"])
+                smoke = games.smoke_test(html)
+                runtime = runtime_qa.run(html)
+            version = stage_def["build"]
+            files = {f"builds/v{version}/index.html": html}
+            if runtime["screenshot"]:
+                files[f"builds/v{version}/screenshot.png"] = runtime["screenshot"]
+            sha = ws.commit_on_main(files, f"build: v{version} ({stage_def['id']}) runtime {runtime['status']}", "Build Engineer")
+            smoke = {**smoke, "runtime": runtime["status"], "runtime_checks": runtime["checks"], "runtime_errors": runtime["errors"][:5]}
+            passed = smoke["passed"] and runtime["status"] != "failed"
             build_id = _id("bld")
-            conn.execute("INSERT INTO builds(id, line_id, version, stage_key, platform, status, smoke, commit_sha) VALUES (?,?,?,?,?,?,?,?)",
-                         (build_id, line["id"], stage_def["build"], stage_def["id"], "web", "playable" if smoke["passed"] else "failed", json.dumps(smoke), sha))
-            conn.execute("INSERT INTO artifacts(line_id, stage_key, path, content) VALUES (?,?,?,?)", (line["id"], stage_def["id"], f"builds/v{stage_def['build']}/index.html", html))
-            self.log(conn, user_id, "BUILD", f"{line['title']} v{stage_def['build']} · smoke {'통과' if smoke['passed'] else '실패'}", line["id"])
+            conn.execute(
+                "INSERT INTO builds(id, line_id, version, stage_key, platform, status, smoke, commit_sha, runtime_status, screenshot) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (build_id, line["id"], version, stage_def["id"], "web", "playable" if passed else "failed", json.dumps(smoke), sha, runtime["status"],
+                 f"builds/v{version}/screenshot.png" if runtime["screenshot"] else None),
+            )
+            conn.execute("INSERT INTO artifacts(line_id, stage_key, path, content) VALUES (?,?,?,?)", (line["id"], stage_def["id"], f"builds/v{version}/index.html", html))
+            self.log(conn, user_id, "BUILD", f"{line['title']} v{version} · smoke {'통과' if smoke['passed'] else '실패'} · runtime {runtime['status']}", line["id"])
             if stage_def["id"] == "vertical" or stage_def.get("ceo_gate"):
                 conn.execute("INSERT INTO reviews(id, line_id, build_id, kind, blocking, status) VALUES (?,?,?,?,?,'pending')",
                              (_id("rev"), line["id"], build_id, "release_candidate" if stage_def.get("ceo_gate") else "milestone", int(bool(stage_def.get("ceo_gate")))))
+        conn.execute("UPDATE stages SET status='completed', qa_status='passed', completed_at=? WHERE id=?", (_iso(), stage_row["id"]))
+        self.log(conn, user_id, "STAGE COMPLETE", f"{line['title']} · {stage_def['name']} 통과", line["id"])
         if stage_def.get("ceo_gate"):
             conn.execute("UPDATE production_lines SET status='awaiting_ceo', leader_state='gate', leader_decision='릴리즈 빌드 CEO 승인 대기' WHERE id=?", (line["id"],))
             return
         self._advance(conn, user_id, line)
+
+    def _runtime_repair(self, conn, user_id, line, stage_def, stage_row, runtime) -> bool:
+        """Opens a runtime-fix game task for a failed build. False once the retry budget is spent."""
+        done = conn.execute("SELECT COUNT(*) FROM tasks WHERE stage_id=? AND task_key LIKE 'runtime-fix%'", (stage_row["id"],)).fetchone()[0]
+        if done >= MAX_RUNTIME_FIXES:
+            return False
+        report = json.dumps({"checks": runtime["checks"], "errors": runtime["errors"]}, ensure_ascii=False, indent=2)
+        conn.execute("INSERT INTO artifacts(line_id, stage_key, path, content) VALUES (?,?,?,?)", (line["id"], stage_def["id"], f"qa/runtime-{stage_def['id']}-{done + 1}.json", report))
+        conn.execute(
+            "INSERT INTO tasks(id, line_id, stage_id, task_key, name, role, kind, difficulty, critical, artifact, status) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (_id("tsk"), line["id"], stage_row["id"], f"runtime-fix{done + 1}", "런타임 오류 자동 수정", "Gameplay Programmer", "debugging", 2, 1, f"fixes/runtime-{done + 1}.patch", "ready"),
+        )
+        conn.execute("UPDATE stages SET status='in_progress', qa_status='failed', completed_at=NULL WHERE id=?", (stage_row["id"],))
+        errors = "; ".join(runtime["errors"][:2]) or "필수 런타임 검사 실패"
+        self.log(conn, user_id, "RUNTIME QA FAIL", f"{line['title']} · {stage_def['name']} 빌드 실행 검사 실패 ({errors}) → 자동 수정 {done + 1}/{MAX_RUNTIME_FIXES}", line["id"])
+        self.message(conn, line["id"], "blocked", "Runtime QA", "Leader", errors, None)
+        return True
 
     def _advance(self, conn, user_id, line):
         if line["stage_index"] >= len(self.stages) - 1:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from .. import db
@@ -105,7 +105,8 @@ def line_detail(f: Factory, conn, line) -> dict:
         )
     ]
     builds = [
-        {"id": b["id"], "version": b["version"], "stageId": b["stage_key"], "status": b["status"], "smoke": json.loads(b["smoke"]), "commit": b["commit_sha"], "createdAt": b["created_at"]}
+        {"id": b["id"], "version": b["version"], "stageId": b["stage_key"], "status": b["status"], "smoke": json.loads(b["smoke"]), "commit": b["commit_sha"],
+         "runtime": b["runtime_status"], "screenshot": bool(b["screenshot"]), "createdAt": b["created_at"]}
         for b in conn.execute("SELECT * FROM builds WHERE line_id=? ORDER BY created_at DESC, rowid DESC", (line["id"],))
     ]
     messages = [
@@ -279,6 +280,20 @@ def play_build(build_id: str, user: User = Depends(current_user)) -> HTMLRespons
     # Generated code runs in an opaque sandboxed origin: no cookies, no same-origin API access.
     headers = {"Content-Security-Policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:", "X-Content-Type-Options": "nosniff"}
     return HTMLResponse(row["content"], headers=headers)
+
+
+@router.get("/builds/{build_id}/screenshot.png")
+def build_screenshot(build_id: str, request: Request, user: User = Depends(current_user)) -> Response:
+    with db.transaction() as conn:
+        row = conn.execute(
+            "SELECT b.screenshot, b.line_id FROM builds b JOIN production_lines l ON l.id=b.line_id WHERE b.id=? AND l.user_id=?", (build_id, user.id)
+        ).fetchone()
+    if row is None or not row["screenshot"]:
+        raise HTTPException(status_code=404, detail="screenshot_not_found")
+    data = factory(request).workspace(user.id, row["line_id"]).read_bytes(row["screenshot"])
+    if data is None:
+        raise HTTPException(status_code=404, detail="screenshot_not_found")
+    return Response(data, media_type="image/png", headers={"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"})
 
 
 @router.get("/logs")
