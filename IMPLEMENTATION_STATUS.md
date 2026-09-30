@@ -1,105 +1,72 @@
 # AI Factory implementation status
 
-Audit date: 2026-09-29
+Audit date: 2026-09-30
 
-Legend: `[x]` implemented, `[-]` partially implemented, `[ ]` not implemented.
+Legend: `[x]` implemented and tested, `[-]` partial, `[ ]` not started.
 
-## Existing foundation
+## P0: browser-testable V1 (GitHub Pages)
 
-- [x] FastAPI application skeleton and health endpoint
-- [x] SQLite employee and routing-log persistence
-- [x] AI employee capability and quota model
-- [x] Balanced, quality, free, and speed routing policies
-- [x] Employee, routing, and routing-log APIs
-- [x] Router unit tests and backend CI workflow
-- [x] Static GitHub Pages deployment workflow
-- [x] Real game-studio production pipeline document
-- [x] ClawTeam-inspired leader/worker/task-graph architecture document
+- [x] Google login entry (preview session without a server; real OAuth when a backend URL is set)
+- [x] Dashboard as a factory floor: KPIs, 13-station line strips, active workers, quota gauges, failovers, build status, events
+- [x] Topic intake → 10 ideas with nine-criterion scores and four AI reviewer critiques
+- [x] Automatic shortlist → parallel production lines; Backlog with "이 아이디어 제작" and capacity guard
+- [x] All 13 studio stages, each with a task graph (role, kind, difficulty, criticality, dependencies, artifact)
+- [x] Per stage: assigned AI, tasks, dependency graph (SVG), artifacts, branch/commit, QA status, quota use
+- [x] Leader Agent per line with lifecycle state, decisions and an agent inbox (task_started, result, review_request, handoff, blocked, quota_warning, dependency_ready)
+- [x] AI Marketplace with filters (추천/설치됨/무료/코딩/기획/비전/이미지/오디오/로컬/로그인 필요) and "+ AI 추가"
+- [x] Auth flow per type: OAuth, API key (backend only; disabled in preview), Local (browser health probe), Custom endpoint
+- [x] Provider metadata with `quota_source` and `last_verified` (null until a real probe)
+- [x] AI Employees: status, auth state, capabilities, quota gauge with reserve marker, usage, error rate, latency, next reset
+- [x] CHEAPEST_VIABLE_QUALITY routing, plus quality / speed / free policies
+- [x] Reserve threshold per AI, adjustable; reserve used only by critical tasks
+- [x] Automatic failover (simulated 429/503/401), cooldowns, auto-hire of the local worker, modality fallback
+- [x] QA failure → automatic fix + retest tasks
+- [x] CEO feedback becomes a task; CEO Review with live build preview, QA checks, approve / request revision
+- [x] Release Candidate gate: Live Ops starts only after CEO approval
+- [x] Filterable production logs (type, line, text)
+- [x] Playable HTML5 builds (0.1 prototype → 1.0 release) in a sandboxed iframe, downloadable
+- [x] Tests: `node --test` engine/router suite; Chromium smoke on desktop and 390px mobile
 
-## P0 — browser-testable V1
+## P1: backend data and accounts
 
-- [x] Google login entry screen (preview session; real OAuth belongs to P1/P2)
-- [x] CEO dashboard
-- [x] Topic intake
-- [x] Topic change with completed-result preservation and paused-line resume
-- [x] Deterministic simulation of ten game ideas with nine-factor evaluation and role critiques
-- [x] Weighted automatic scoring and shortlist
-- [x] Idea Backlog and “build this idea” action
-- [x] Multiple independent production-line cards
-- [x] All 13 real game-studio stages
-- [x] AI Marketplace
-- [x] Add/install AI action
-- [x] Installed AI employee list
-- [x] Quota gauges
-- [x] `CHEAPEST_VIABLE_QUALITY` browser routing simulation
-- [x] Per-provider reserve threshold
-- [x] Automatic failover simulation with reserve protection and handoff logs
-- [x] CEO feedback entry and production log
-- [x] Autonomous stage-by-stage Autopilot with pause/resume and instant-complete controls
-- [x] Dedicated CEO Review queue with build/QA/approval/revision state
-- [x] Left-side completed-game results view with repository and GitHub Pages addresses
-- [x] Real standalone HTML5 microgame generation, in-browser play, smoke validation, and download
-- [x] Per-line GDD, QA acceptance criteria, risk register, and dependency-aware production task graph
-- [x] Idea-specific Strategy, Action, and Management playable game families
-- [x] Server-side game-named repository creation/update, release commit, main-ref push, and GitHub Pages activation code
-- [ ] Publisher backend hosting and `AI_FACTORY_GITHUB_TOKEN` configuration
-- [ ] Authenticated browser-to-backend completion/publish wiring
-- [x] Unpublished preview records do not expose clickable GitHub/Pages links
+- [x] Versioned SQLite migrations: users, sessions, oauth_states, provider_connections, encrypted_credentials, projects, ideas, production_lines, stages, tasks, task_dependencies, workers, messages, quota_snapshots, usage_logs, artifacts, builds, feedback, reviews, factory_logs
+- [x] Google OAuth code flow (PKCE, single-use state, allow-listed return, ID-token claim checks); hashed sessions in HttpOnly cookies
+- [x] CSRF guard (custom header + Origin allow-list); dev login behind an explicit flag
+- [x] AES-256-GCM vault bound to user and credential id; `vault://` references only; secret redaction
+- [x] Account-scoped settings, connections, projects, lines, quota history and feedback
+- [x] Console backend mode: `/state` snapshot, all CEO actions via the API, sandboxed build playback
+- [ ] Hosted backend deployment and production Google OAuth client
 
-## P1 — backend data and account structure
+## P2: real provider adapters
 
-- [ ] Users and real Google OAuth session
-- [ ] Provider connections and credential references
-- [ ] Encrypted credential vault
-- [ ] Projects and ideas
-- [ ] Production lines and stages
-- [ ] Tasks and task dependencies
-- [ ] Workers and structured inbox messages
-- [ ] Quota snapshots and usage logs
-- [ ] Artifacts and builds
-- [ ] CEO feedback persistence
+- [x] Adapter contract: health_check, list_models, execute, quota_probe, usage_parser, error_classifier
+- [x] OpenAI-compatible: Groq, Cerebras, Mistral, GitHub Models, Hugging Face router, llama.cpp, Ollama, custom endpoint
+- [x] Gemini (key in header only), OpenRouter (key quota endpoint), Cloudflare Workers AI (account template)
+- [x] Rate-limit header quota capture; connect → vault → health_check → quota_probe; re-verify; delete
+- [ ] Provider OAuth apps (OpenRouter PKCE, GitHub, Google AI): endpoint returns 501 for now
+- [ ] ComfyUI, local audio and Anthropic adapters (catalog entries are marked `planned`)
+- [ ] Live verification of every free-tier quota against real accounts (needs keys)
 
-## P2 — real provider adapters
+## P3: GitHub worker execution
 
-- [ ] Common adapter contract (`health_check`, `list_models`, `execute`, `quota_probe`, `usage_parser`, `error_classifier`)
-- [ ] Gemini
-- [ ] Cerebras
-- [ ] Groq
-- [ ] OpenRouter
-- [ ] Cloudflare Workers AI
-- [ ] Mistral
-- [ ] llama.cpp local endpoint
+- [x] Dependency-aware task graph scheduler (server Leader) with per-line locks and a server autopilot
+- [x] Per-task branch `ai-factory/<project>/<line>/<agent>/<stage>-<task>` in its own git worktree
+- [x] Worker commit → reviewer (coding tasks) → merge `--no-ff` into main → worktree and branch cleanup
+- [x] Path confinement for model-supplied file names (incl. Windows anchors/drives), Windows MAX_PATH-safe layout
+- [ ] Push line repositories to GitHub (publisher exists for releases; per-line remote sync not wired)
+- [ ] Parallel workers inside one wave (currently sequential per line)
 
-## P3 — GitHub worker execution
+## P4: end-to-end generated game
 
-- [ ] Dependency-aware task graph scheduler
-- [ ] Per-worker branch and Git worktree
-- [ ] Worker commit
-- [ ] Reviewer diff and automated tests
-- [ ] Merge and worktree cleanup
-- [x] Server-side GitHub repository publisher
+- [x] Topic → ideas → automatic selection → planning artifacts → coding → build → QA → repair → CEO review
+- [x] Model-written single-file game iterated by game tasks, statically validated, last good game kept
+- [x] Web release and Windows release folder (offline game + Play.cmd launcher)
+- [ ] Headless runtime QA of generated games (Playwright in an isolated runner) and screenshot capture
+- [ ] Native Windows packaging (Tauri/Electron)
+- [ ] Release publishing to GitHub Pages per game from the server Leader
 
-## P4 — end-to-end generated game
+## CI
 
-- [x] Theme to idea selection (deterministic local planner)
-- [-] Planning to generated code (three tested local genre templates; external model generation pending)
-- [-] Sandboxed run and test (iframe sandbox and static smoke checks; isolated backend runner pending)
-- [ ] Automated repair loop
-- [ ] Windows build
-- [ ] CEO build review
-- [ ] Release and live-ops loop
-
-## Security checks
-
-- [x] `.env`, databases, logs, build outputs, and common credential files are ignored
-- [x] Static preview stores no provider API key
-- [x] Architecture keeps provider secrets behind a backend/vault boundary
-- [ ] Encrypted server-side vault implementation
-- [ ] Sandboxed generated-code runner
-
-## Immediate implementation order
-
-1. Persist production lines and publish-job results in the backend.
-2. Connect the browser completion queue to the authenticated backend publisher.
-3. Replace the preview's predicted URLs with the publisher's returned repository and `github.io` URLs.
-4. Continue P1 persistence and account boundaries.
+- [x] Backend CI (pytest)
+- [-] Pages deploy: `ci/pages.yml` gates deploy on web tests and the Chromium smoke test, but the local
+  `gh` token lacks the `workflow` scope, so the active workflow still runs only a syntax check.
