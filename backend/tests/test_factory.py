@@ -212,3 +212,30 @@ def test_invalid_model_game_is_rejected_and_last_good_game_kept(signed_in, http)
     assert any(l["type"] == "GAME REJECTED" for l in signed_in.get("/logs").json())
     builds = signed_in.get(f"/lines/{line_id}").json()["builds"]
     assert builds and all(b["smoke"]["passed"] for b in builds)
+
+
+def test_wave_runs_provider_calls_in_parallel(signed_in, http):
+    import threading
+    import time as _time
+
+    _connect(signed_in, http, "groq", "api.groq.com/openai/v1/models", {"data": [{"id": "llama"}]})
+    live = {"now": 0, "peak": 0}
+    lock = threading.Lock()
+
+    def slow_chat(req):
+        with lock:
+            live["now"] += 1
+            live["peak"] = max(live["peak"], live["now"])
+        _time.sleep(0.4)
+        with lock:
+            live["now"] -= 1
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok\nRESULT: PASS"}}]})
+
+    http.add("POST", "chat/completions", slow_chat)
+    signed_in.post("/projects", json={"topic": "홀덤"}, headers=CSRF)
+    line_id = _lines(signed_in)[0]["id"]
+    wave = signed_in.post(f"/lines/{line_id}/tick", headers=CSRF).json()
+    assert wave["executed"] == 3  # greenlight: loop, scope, tech have no dependencies
+    assert live["peak"] >= 2
+    tasks = signed_in.get(f"/lines/{line_id}").json()["stages"]["greenlight"]["tasks"]
+    assert sum(t["status"] == "completed" for t in tasks) == 3

@@ -13,10 +13,11 @@ import json
 import secrets
 import sqlite3
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from .. import catalog, routing, vault
+from .. import catalog, db, routing, vault
 from ..connections import next_reset
 from ..providers import AdapterUnavailable, build_adapter
 from . import games
@@ -316,23 +317,43 @@ class Factory:
             return True
         return any(t["id"] == task["task_key"] and t.get("game") for t in stage_def["tasks"])
 
-    def _run_task(self, conn, user_id, line, stage_def, stage_row, task, policy):
-        ctx = self._context(conn, line, stage_def, task)
-        ws = self.workspace(user_id, line["id"])
-        ws.ensure(line["title"])
-        game_task = self._is_game_task(stage_def, task)
-        if game_task:
-            ctx.game_source = self.current_game(ws, line)
-        conn.execute("UPDATE tasks SET status='in_progress', attempts=attempts+1, started_at=? WHERE id=?", (_iso(), task["id"]))
+    def _execute_phase(self, user_id, line, stage_def, task, policy) -> dict:
+        """Worker-thread part of a task: context + provider calls. Uses its own autocommit connection
+        so no write lock is held across slow network calls; touches no git state."""
+        conn = db.connect(autocommit=True)
         try:
-            text, connection_id, worker = self.execute(conn, user_id, line["id"], dict(task), ctx, policy)
-        except AllProvidersFailed:
+            ctx = self._context(conn, line, stage_def, task)
+            game_task = self._is_game_task(stage_def, task)
+            if game_task:
+                ctx.game_source = self.current_game(self.workspace(user_id, line["id"]), line)
+            conn.execute("UPDATE tasks SET status='in_progress', attempts=attempts+1, started_at=? WHERE id=?", (_iso(), task["id"]))
+            try:
+                text, connection_id, worker = self.execute(conn, user_id, line["id"], dict(task), ctx, policy)
+            except AllProvidersFailed:
+                return {"blocked": True}
+            reviewer, reviewer_conn = None, None
+            if task["kind"] == "coding":
+                path, body = to_file_content(task["artifact"] or "notes.md", text)
+                review_ctx = TaskContext(**{**ctx.__dict__, "task_name": f"diff 리뷰: {task['name']}", "role": "Technical Director", "kind": "qa",
+                                             "artifact": "review.md", "dependencies": {path: body}, "game_source": None})
+                review_task = {**dict(task), "kind": "debugging", "difficulty": 2, "critical": 0}
+                _, reviewer_conn, reviewer = self.execute(conn, user_id, line["id"], review_task, review_ctx, policy)
+            return {"blocked": False, "ctx": ctx, "game_task": game_task, "text": text, "connection_id": connection_id,
+                    "worker": worker, "reviewer": reviewer, "reviewer_conn": reviewer_conn}
+        finally:
+            conn.close()
+
+    def _finalize_task(self, conn, user_id, line, stage_def, stage_row, task, res):
+        """Leader-thread part: files → worktree commit → merge → task/artifact rows (serialized)."""
+        if res["blocked"]:
             conn.execute("UPDATE tasks SET status='blocked' WHERE id=?", (task["id"],))
             self.log(conn, user_id, "BLOCKED", f"{line['title']} · {task['name']} 배정 가능한 AI 없음", line["id"])
             return
+        ws = self.workspace(user_id, line["id"])
+        text, connection_id, worker, reviewer = res["text"], res["connection_id"], res["worker"], res["reviewer"]
         path, body = to_file_content(task["artifact"] or "notes.md", text)
         files = {path: body}
-        if game_task:
+        if res["game_task"]:
             generated = extract_game(text) if connection_id != SIM_ID else None
             if generated and games.smoke_test(generated)["passed"]:
                 files[GAME_PATH] = generated
@@ -341,7 +362,7 @@ class Factory:
                 if generated:
                     self.log(conn, user_id, "GAME REJECTED", f"{line['title']} · {worker} 결과가 정적 검증 실패 → 이전 게임 유지", line["id"])
                 if ws.read(GAME_PATH) is None:
-                    files[GAME_PATH] = ctx.game_source  # seed main with a playable game
+                    files[GAME_PATH] = res["ctx"].game_source  # seed main with a playable game
         if task["artifact"] == "release/index.html":
             files[path] = self.current_game(ws, line)
             files["release/NOTES.md"] = text
@@ -349,16 +370,12 @@ class Factory:
             files.pop(path, None)
             path = "release/windows/Play.cmd"
             files.update(windows_package(self.current_game(ws, line), line["title"]))
-        reviewer, reviewer_conn = None, None
-        if task["kind"] == "coding":
-            review_ctx = TaskContext(**{**ctx.__dict__, "task_name": f"diff 리뷰: {task['name']}", "role": "Technical Director", "kind": "qa",
-                                         "artifact": "review.md", "dependencies": {path: files[path]}})
-            review_task = {**dict(task), "kind": "debugging", "difficulty": 2, "critical": 0}
-            _, reviewer_conn, reviewer = self.execute(conn, user_id, line["id"], review_task, review_ctx, policy)
+        if reviewer:
             self.message(conn, line["id"], "review_request", worker, reviewer, "diff 검토", task["id"])
         branch = ws.branch_name(line["project_slug"], line["slug"], worker, stage_def["id"], task["task_key"])
         commit = ws.commit_task(branch=branch, files=files, message=f"{stage_def['id']}: {task['name']}", author=worker)
         verdict = qa_verdict(text) if task["kind"] in ("qa", "vision") and not task["repair_of"] else ("passed" if task["kind"] in ("qa", "vision") else ("tests_passed" if task["kind"] == "coding" else None))
+        reviewer_conn = res["reviewer_conn"]
         conn.execute(
             """UPDATE tasks SET status='completed', connection_id=?, worker_name=?, reviewer_connection_id=?, reviewer_name=?,
                branch=?, commit_sha=?, qa_status=?, finished_at=? WHERE id=?""",
@@ -411,6 +428,19 @@ class Factory:
         finally:
             lock.release()
 
+    def _select_wave(self, conn, stage_def, stage_row, limit) -> list:
+        """Ready tasks for this wave; at most one game-writing task so edits never race."""
+        wave, has_game = [], False
+        for task in conn.execute("SELECT * FROM tasks WHERE stage_id=? AND status IN ('ready','blocked') ORDER BY rowid", (stage_row["id"],)):
+            if len(wave) >= limit:
+                break
+            if self._is_game_task(stage_def, task):
+                if has_game:
+                    continue
+                has_game = True
+            wave.append(task)
+        return wave
+
     def _tick_line(self, conn, user_id, line_id) -> dict:
         line = conn.execute("SELECT * FROM production_lines WHERE id=? AND user_id=?", (line_id, user_id)).fetchone()
         if line is None:
@@ -423,10 +453,19 @@ class Factory:
         if stage_row is None:
             stage_row = self._instantiate(conn, line, stage_def)
         self._refresh(conn, stage_row["id"])
-        ready = conn.execute("SELECT * FROM tasks WHERE stage_id=? AND status IN ('ready','blocked') ORDER BY rowid LIMIT ?", (stage_row["id"], s["workers_per_line"])).fetchall()
-        for task in ready:
-            conn.execute("UPDATE production_lines SET leader_state='dispatching', leader_decision=? WHERE id=?", (f"{stage_def['name']} · {task['name']} 배정", line_id))
-            self._run_task(conn, user_id, line, stage_def, stage_row, task, s["policy"])
+        ready = self._select_wave(conn, stage_def, stage_row, s["workers_per_line"])
+        if ready:
+            names = ", ".join(t["name"] for t in ready)
+            conn.execute("UPDATE production_lines SET leader_state='dispatching', leader_decision=? WHERE id=?", (f"{stage_def['name']} · 병렬 {len(ready)}: {names}"[:300], line_id))
+            self.workspace(user_id, line_id).ensure(line["title"])
+            conn.commit()  # release the write lock before workers start
+            if len(ready) > 1:
+                with ThreadPoolExecutor(max_workers=len(ready), thread_name_prefix="ai-factory-worker") as pool:
+                    results = list(pool.map(lambda t: self._execute_phase(user_id, line, stage_def, t, s["policy"]), ready))
+            else:
+                results = [self._execute_phase(user_id, line, stage_def, ready[0], s["policy"])]
+            for task, res in zip(ready, results):
+                self._finalize_task(conn, user_id, line, stage_def, stage_row, task, res)
         self._refresh(conn, stage_row["id"])
         open_count = conn.execute("SELECT COUNT(*) FROM tasks WHERE stage_id=? AND status!='completed'", (stage_row["id"],)).fetchone()[0]
         blocked = conn.execute("SELECT COUNT(*) FROM tasks WHERE stage_id=? AND status='blocked'", (stage_row["id"],)).fetchone()[0]
@@ -500,8 +539,6 @@ class Factory:
 
 def autopilot_pass(factory: "Factory") -> int:
     """Advances every running autopilot line by one wave. Returns how many lines moved."""
-    from .. import db
-
     with db.transaction() as conn:
         lines = conn.execute("SELECT id, user_id FROM production_lines WHERE status='running' AND autopilot=1 ORDER BY created_at").fetchall()
     moved = 0

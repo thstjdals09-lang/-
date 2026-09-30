@@ -273,11 +273,13 @@ def db_path() -> Path:
     return Path(os.environ.get("AI_FACTORY_DB", "data/ai_factory.sqlite3"))
 
 
-def connect() -> sqlite3.Connection:
+def connect(autocommit: bool = False) -> sqlite3.Connection:
+    """autocommit=True: every statement commits on its own (worker threads never hold a write
+    lock across a provider call)."""
     path = db_path()
     if str(path) != ":memory:":
         path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path, timeout=30, check_same_thread=False)
+    conn = sqlite3.connect(path, timeout=30, check_same_thread=False, isolation_level=None if autocommit else "")
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     if str(path) != ":memory:":
