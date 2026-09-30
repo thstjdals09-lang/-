@@ -12,6 +12,7 @@ import hashlib
 import json
 import secrets
 import sqlite3
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -61,6 +62,13 @@ class Factory:
         self.transport = transport
         self.studio = catalog.studio(catalog_dir)
         self.stages = self.studio["stages"]
+        self._locks: dict[str, threading.Lock] = {}
+        self._locks_guard = threading.Lock()
+
+    def line_lock(self, line_id: str) -> threading.Lock:
+        """One Leader at a time per line (API requests and the autopilot thread share lines)."""
+        with self._locks_guard:
+            return self._locks.setdefault(line_id, threading.Lock())
 
     # ------------------------------------------------------------------ logs / messages
 
@@ -355,6 +363,15 @@ class Factory:
 
     def tick_line(self, conn, user_id, line_id) -> dict:
         """One Leader wave: execute up to workers_per_line ready tasks, then evaluate the gate."""
+        lock = self.line_lock(line_id)
+        if not lock.acquire(timeout=120):
+            return {"status": "busy", "executed": 0}
+        try:
+            return self._tick_line(conn, user_id, line_id)
+        finally:
+            lock.release()
+
+    def _tick_line(self, conn, user_id, line_id) -> dict:
         line = conn.execute("SELECT * FROM production_lines WHERE id=? AND user_id=?", (line_id, user_id)).fetchone()
         if line is None:
             raise KeyError("line not found")
@@ -386,9 +403,9 @@ class Factory:
         for _ in range(max_waves):
             wave = self.tick_line(conn, user_id, line_id)
             result = {"status": wave["status"], "executed": result["executed"] + wave["executed"]}
-            if wave["status"] != "running":
+            if wave["status"] not in ("running", "busy"):
                 break
-            stalled = stalled + 1 if wave["executed"] == 0 or wave.get("blocked") == wave["executed"] else 0
+            stalled = stalled + 1 if wave["executed"] == 0 or wave["status"] == "busy" or wave.get("blocked") == wave["executed"] else 0
             if stalled >= 3:
                 break
         return result
@@ -439,3 +456,21 @@ class Factory:
             raise KeyError("review not found")
         conn.execute("UPDATE reviews SET status='revision_requested', note=?, reviewed_at=? WHERE id=?", (note, _iso(), review_id))
         self.add_feedback(conn, user_id, review["line_id"], note)
+
+
+def autopilot_pass(factory: "Factory") -> int:
+    """Advances every running autopilot line by one wave. Returns how many lines moved."""
+    from .. import db
+
+    with db.transaction() as conn:
+        lines = conn.execute("SELECT id, user_id FROM production_lines WHERE status='running' AND autopilot=1 ORDER BY created_at").fetchall()
+    moved = 0
+    for line in lines:
+        try:
+            with db.transaction() as conn:
+                if factory.tick_line(conn, line["user_id"], line["id"])["executed"]:
+                    moved += 1
+        except Exception as exc:  # one broken line must not stop the factory
+            with db.transaction() as conn:
+                factory.log(conn, line["user_id"], "LEADER ERROR", f"{type(exc).__name__}: {exc}", line["id"])
+    return moved

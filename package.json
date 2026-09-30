@@ -4,7 +4,9 @@
   "type": "module",
   "scripts": {
     "test": "node --test \"tests/web/*.test.mjs\"",
-    "check": "node scripts/check-web.mjs"
+    "check": "node scripts/check-web.mjs",
+    "e2e": "node tests/e2e/smoke.mjs",
+    "e2e:backend": "node tests/e2e/backend-smoke.mjs"
   },
   "devDependencies": {
     "playwright": "^1.63.0"

@@ -15,6 +15,7 @@ def isolated_env(tmp_path, monkeypatch):
     monkeypatch.setenv("AI_FACTORY_DB", str(tmp_path / "test.sqlite3"))
     monkeypatch.setenv(vault.KEY_ENV, vault.generate_key())
     monkeypatch.setenv("AI_FACTORY_WORKSPACE", str(tmp_path / "workspaces"))
+    monkeypatch.setenv("AI_FACTORY_AUTOPILOT_SECONDS", "0")  # tests drive the Leader explicitly
     yield
 
 

@@ -158,3 +158,18 @@ def test_workspace_rejects_unsafe_paths(tmp_path):
     for bad in ("../escape.txt", ".git/config", "/abs.txt", r"\abs.txt", "C:/x.txt", "a/../../x.txt"):
         with pytest.raises(WorkspaceError):
             ws.commit_task(branch="ai-factory/p/l/a/s-t", files={bad: "x"}, message="m", author="a")
+
+
+def test_state_snapshot_and_autopilot_pass(signed_in, client):
+    from app.factory.api import get_factory
+    from app.factory.leader import autopilot_pass
+
+    signed_in.post("/projects", json={"topic": "좀비"}, headers=CSRF)
+    assert autopilot_pass(get_factory(client.app)) == 3
+    snap = signed_in.get("/state").json()
+    assert len(snap["ideas"]) == 10 and len(snap["lines"]) == 3
+    assert all(any(s["tasks"] for s in l["stages"].values()) for l in snap["lines"])
+    assert snap["counters"]["tasksDone"] >= 3
+    line_id = snap["lines"][0]["id"]
+    signed_in.post(f"/lines/{line_id}/autopilot", json={"on": False}, headers=CSRF)
+    assert autopilot_pass(get_factory(client.app)) == 2

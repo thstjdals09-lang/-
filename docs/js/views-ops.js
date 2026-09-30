@@ -79,8 +79,8 @@ export function logs(app) {
 
 export function settings(app) {
   const s = app.state.settings;
-  const opt = (obj, cur) => Object.entries(obj).map(([k, v]) => '<option value="' + k + '"' + (k === cur ? " selected" : "") + ">" + esc(v) + "</option>").join("");
   const u = app.state.user;
+  const opt = (obj, cur) => Object.entries(obj).map(([k, v]) => '<option value="' + k + '"' + (k === cur ? " selected" : "") + ">" + esc(v) + "</option>").join("");
   return (
     '<div class="twoCol"><section class="panel"><div class="eyebrow">PRODUCTION POLICY</div><h2>생산 최적화</h2>' +
     '<form class="form" data-form="settings">' +
@@ -89,8 +89,8 @@ export function settings(app) {
     '<label>자동 shortlist 수<input name="autoShortlist" type="number" min="1" max="10" value="' + s.autoShortlist + '"></label>' +
     '<label>라인당 병렬 워커<input name="workersPerLine" type="number" min="1" max="8" value="' + s.workersPerLine + '"></label></div>' +
     '<label class="check"><input name="autopilot" type="checkbox"' + (s.autopilot ? " checked" : "") + "> 생산라인 Autopilot (Leader가 자동 진행)</label>" +
-    '<div class="formRow"><label>Provider 오류 시뮬레이션 ' + Math.round(s.failureRate * 100) + '%<input name="failureRate" type="range" min="0" max="60" step="2" value="' + Math.round(s.failureRate * 100) + '"></label>' +
-    '<label>QA 실패 시뮬레이션 ' + Math.round(s.qaFailRate * 100) + '%<input name="qaFailRate" type="range" min="0" max="80" step="5" value="' + Math.round(s.qaFailRate * 100) + '"></label></div>' +
+    (u.mode === "backend" ? "" : '<div class="formRow"><label>Provider 오류 시뮬레이션 ' + Math.round(s.failureRate * 100) + '%<input name="failureRate" type="range" min="0" max="60" step="2" value="' + Math.round(s.failureRate * 100) + '"></label>' +
+    '<label>QA 실패 시뮬레이션 ' + Math.round(s.qaFailRate * 100) + '%<input name="qaFailRate" type="range" min="0" max="80" step="5" value="' + Math.round(s.qaFailRate * 100) + '"></label></div>') +
     '<button class="btn primary">저장</button></form></section>' +
     '<section class="panel"><div class="eyebrow">ACCOUNT · BACKEND</div><h2>계정과 서버</h2>' +
     '<p class="muted">로그인: <strong>' + esc(u.email || "-") + "</strong> · 모드 <strong>" + (u.mode === "backend" ? "백엔드 연결" : "프리뷰 (브라우저 시뮬레이션)") + "</strong></p>" +

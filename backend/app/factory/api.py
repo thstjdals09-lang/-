@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from .. import db
 from ..auth import User, csrf_guard, current_user
+from ..connections import row_to_out
 from .leader import DEFAULT_USER_SETTINGS, CapacityError, Factory
 
 router = APIRouter(tags=["factory"], dependencies=[Depends(csrf_guard)])
@@ -38,7 +39,10 @@ class Toggle(BaseModel):
 
 
 def factory(request: Request) -> Factory:
-    app = request.app
+    return get_factory(request.app)
+
+
+def get_factory(app) -> Factory:
     if getattr(app.state, "factory", None) is None:
         s = app.state.settings
         app.state.factory = Factory(s.catalog_dir, s.workspace_dir, simulate=s.simulate_without_providers, transport=getattr(app.state, "http_transport", None))
@@ -64,10 +68,16 @@ def _progress(f: Factory, conn, line) -> int:
     return round((line["stage_index"] + frac) / len(f.stages) * 100)
 
 
+def _topic(conn, project_id) -> str:
+    row = conn.execute("SELECT topic FROM projects WHERE id=?", (project_id,)).fetchone()
+    return row["topic"] if row else ""
+
+
 def line_summary(f: Factory, conn, line) -> dict:
     stage = f.stages[line["stage_index"]]
     return {
-        "id": line["id"], "title": line["title"], "status": line["status"], "family": line["family"], "gameType": line["game_type"],
+        "id": line["id"], "projectId": line["project_id"], "ideaId": line["idea_id"], "topic": _topic(conn, line["project_id"]),
+        "title": line["title"], "status": line["status"], "family": line["family"], "gameType": line["game_type"],
         "stageIndex": line["stage_index"], "stage": stage["id"], "stageName": stage["name"], "progress": _progress(f, conn, line),
         "autopilot": bool(line["autopilot"]), "leader": {"state": line["leader_state"], "lastDecision": line["leader_decision"]},
     }
@@ -279,3 +289,32 @@ def logs(user: User = Depends(current_user), limit: int = Query(default=200, ge=
         else:
             rows = conn.execute("SELECT * FROM factory_logs WHERE user_id=? ORDER BY id DESC LIMIT ?", (user.id, limit))
         return [dict(r) for r in rows]
+
+
+@router.get("/state")
+def state(request: Request, user: User = Depends(current_user)) -> dict:
+    """Everything the web console renders, in one round trip."""
+    f = factory(request)
+    with db.transaction() as conn:
+        projects = [dict(r) for r in conn.execute("SELECT id, topic, genre, platform, notes, created_at FROM projects WHERE user_id=? ORDER BY created_at DESC", (user.id,))]
+        ideas = [
+            {**dict(r), "loop": json.loads(r["loop"]), "metrics": json.loads(r["metrics"]), "reviews": json.loads(r["reviews"])}
+            for r in conn.execute("SELECT i.* FROM ideas i JOIN projects p ON p.id=i.project_id WHERE p.user_id=? ORDER BY p.created_at DESC, i.rank", (user.id,))
+        ]
+        lines = [line_detail(f, conn, l) for l in conn.execute("SELECT * FROM production_lines WHERE user_id=? ORDER BY created_at", (user.id,))]
+        reviews = [
+            {**dict(r), "blocking": bool(r["blocking"]), "smoke": json.loads(r["smoke"])}
+            for r in conn.execute(
+                """SELECT r.*, l.title, b.version, b.stage_key, b.smoke FROM reviews r JOIN production_lines l ON l.id=r.line_id JOIN builds b ON b.id=r.build_id
+                   WHERE l.user_id=? ORDER BY r.created_at DESC""",
+                (user.id,),
+            )
+        ]
+        logs = [dict(r) for r in conn.execute("SELECT * FROM factory_logs WHERE user_id=? ORDER BY id DESC LIMIT 300", (user.id,))]
+        counters = {row["type"]: row["n"] for row in conn.execute("SELECT type, COUNT(*) AS n FROM factory_logs WHERE user_id=? GROUP BY type", (user.id,))}
+        connections = [row_to_out(conn, r).model_dump() for r in conn.execute("SELECT * FROM provider_connections WHERE user_id=? ORDER BY created_at", (user.id,))]
+        return {
+            "settings": f.user_settings(conn, user.id),
+            "projects": projects, "ideas": ideas, "lines": lines, "reviews": reviews, "logs": logs, "connections": connections,
+            "counters": {"failovers": counters.get("FAILOVER", 0), "quotaWarnings": counters.get("QUOTA WARNING", 0), "tasksDone": counters.get("COMMIT", 0)},
+        }

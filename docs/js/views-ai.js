@@ -38,14 +38,20 @@ export function team(app) {
       "<div><dt>지연</dt><dd>" + (avgLatency ? avgLatency + "ms" : "-") + "</dd></div><div><dt>Failover</dt><dd>" + e.stats.failovers + "</dd></div>" +
       "<div><dt>속도</dt><dd>" + e.speed + "</dd></div><div><dt>신뢰도</dt><dd>" + e.reliability + "</dd></div>" +
       "<div><dt>검증</dt><dd>" + (e.lastVerified ? esc(fmtTime(e.lastVerified)) : "미검증") + "</dd></div></dl>" +
-      '<label class="reserve">예약선 <input type="range" min="0" max="50" step="5" value="' + Math.round(e.quota.reserve * 100) + '" data-change="reserve" data-id="' + esc(e.id) + '" ' + (unlimited ? "disabled" : "") + "></label>" +
-      '<div class="actions wrap">' +
-      (e.status === "paused"
-        ? '<button class="btn small" data-action="emp-resume" data-id="' + esc(e.id) + '">배정 재개</button>'
-        : '<button class="btn small" data-action="emp-pause" data-id="' + esc(e.id) + '">배정 중지</button>') +
-      (e.status === "auth_required" ? '<button class="btn small primary" data-action="emp-reauth" data-id="' + esc(e.id) + '">재인증</button>' : "") +
-      (!unlimited ? '<button class="btn small" data-action="emp-drain" data-id="' + esc(e.id) + '" title="예약선까지 사용량을 채워 failover를 시험">쿼터 소진 테스트</button><button class="btn small" data-action="emp-reset" data-id="' + esc(e.id) + '">사용량 리셋</button>' : "") +
-      (e.authType === "local" && localCount <= 1 ? "" : '<button class="btn small danger" data-action="emp-remove" data-id="' + esc(e.id) + '">해고</button>') +
+      (e.synthetic
+        ? '<p class="muted small">연결된 AI가 없어 서버의 시뮬레이션 워커가 공장을 유지하고 있습니다. AI 마켓에서 실제 AI를 연결하세요.</p><div>'
+        : e.connectionMode === "backend"
+          ? (e.lastError ? '<p class="muted small">마지막 오류: ' + esc(e.lastError) + "</p>" : "") +
+            '<div class="actions wrap"><button class="btn small" data-action="emp-reauth" data-id="' + esc(e.id) + '">재검증 · quota_probe</button>' +
+            '<button class="btn small danger" data-action="emp-remove" data-id="' + esc(e.id) + '">연결 삭제</button>'
+          : '<label class="reserve">예약선 <input type="range" min="0" max="50" step="5" value="' + Math.round(e.quota.reserve * 100) + '" data-change="reserve" data-id="' + esc(e.id) + '" ' + (unlimited ? "disabled" : "") + "></label>" +
+            '<div class="actions wrap">' +
+            (e.status === "paused"
+              ? '<button class="btn small" data-action="emp-resume" data-id="' + esc(e.id) + '">배정 재개</button>'
+              : '<button class="btn small" data-action="emp-pause" data-id="' + esc(e.id) + '">배정 중지</button>') +
+            (e.status === "auth_required" ? '<button class="btn small primary" data-action="emp-reauth" data-id="' + esc(e.id) + '">재인증</button>' : "") +
+            (!unlimited ? '<button class="btn small" data-action="emp-drain" data-id="' + esc(e.id) + '" title="예약선까지 사용량을 채워 failover를 시험">쿼터 소진 테스트</button><button class="btn small" data-action="emp-reset" data-id="' + esc(e.id) + '">사용량 리셋</button>' : "") +
+            (e.authType === "local" && localCount <= 1 ? "" : '<button class="btn small danger" data-action="emp-remove" data-id="' + esc(e.id) + '">해고</button>')) +
       "</div></article>"
     );
   });

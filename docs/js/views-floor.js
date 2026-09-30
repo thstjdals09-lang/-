@@ -280,7 +280,7 @@ function lineDetail(line, app) {
     "</section></div>" +
     '<div class="twoCol">' +
     '<section class="panel"><div class="panelHead"><div><div class="eyebrow">ARTIFACTS · BUILDS</div><h2>산출물</h2></div></div>' +
-    (line.builds.length ? '<ul class="plainList">' + line.builds.map((b) => "<li><div><strong>v" + esc(b.version) + " · " + esc(b.stageId) + "</strong><small>" + esc(fmtTime(b.createdAt)) + " · " + fmtNum(b.bytes) + " bytes</small></div>" + pill(b.smoke.passed ? "passed" : "failed", "smoke") + '<button class="btn small" data-action="play" data-id="' + esc(line.id) + '">실행</button><button class="btn small" data-action="download-build" data-id="' + esc(line.id) + '">다운로드</button></li>').join("") + "</ul>" : "") +
+    (line.builds.length ? '<ul class="plainList">' + line.builds.map((b) => "<li><div><strong>v" + esc(b.version) + " · " + esc(b.stageId) + "</strong><small>" + esc(fmtTime(b.createdAt)) + (b.bytes ? " · " + fmtNum(b.bytes) + " bytes" : "") + (b.commit ? " · " + esc(String(b.commit).slice(0, 7)) : "") + "</small></div>" + pill(b.smoke.passed ? "passed" : "failed", "smoke") + '<button class="btn small" data-action="play" data-id="' + esc(line.id) + '">실행</button><button class="btn small" data-action="download-build" data-id="' + esc(line.id) + '">다운로드</button></li>').join("") + "</ul>" : "") +
     '<div class="artifactGroups">' + Object.entries(byStage).map(([sid, names]) => "<div><small>" + esc(sid) + "</small>" + names.map((n) => "<code>" + esc(n) + "</code>").join("") + "</div>").join("") + "</div>" +
     "</section>" +
     '<section class="panel"><div class="panelHead"><div><div class="eyebrow">CEO FEEDBACK</div><h2>수정 지시</h2></div></div>' +

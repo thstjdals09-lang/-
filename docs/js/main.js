@@ -8,6 +8,7 @@ import { buildGame, loadGameTemplates } from "./games.js";
 import { gddMarkdown, qaMarkdown } from "./artifacts.js";
 import { esc, download } from "./ui.js";
 import { createApi, probeLocalEndpoint } from "./api.js";
+import { fromSnapshot } from "./remote.js";
 import * as floor from "./views-floor.js";
 import * as ai from "./views-ai.js";
 import * as ops from "./views-ops.js";
@@ -31,6 +32,9 @@ const TABS = [
 
 const app = { state: null, ctx: null, ui: null };
 let catalog = null;
+let previewState = null; // the browser simulation, set aside while signed in to the backend
+let syncing = false;
+let tickCount = 0;
 const api = createApi(() => app.state && app.state.settings.backendUrl);
 
 // ---------- persistence (non-secret production state only) ----------
@@ -41,13 +45,58 @@ function readJson(key) {
 function writeJson(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage full or blocked */ }
 }
+function isRemote() {
+  return !!(app.state && app.state.user.mode === "backend");
+}
+
 function save() {
-  writeJson(STATE_KEY, app.state);
+  if (!isRemote()) writeJson(STATE_KEY, app.state);
+  else if (previewState) {
+    previewState.settings.backendUrl = app.state.settings.backendUrl;
+    writeJson(STATE_KEY, previewState);
+  }
   writeJson(UI_KEY, { tab: app.ui.tab, lineId: app.ui.lineId, marketFilter: app.ui.marketFilter });
 }
 
 function makeCtx() {
   return { studio: catalog.studio, providers: catalog.providers, catalogUpdated: catalog.updated, now: Date.now(), rng: Math.random };
+}
+
+// ---------- backend mode ----------
+
+async function sync() {
+  if (syncing) return;
+  syncing = true;
+  try {
+    app.state = fromSnapshot(await api.state(), app.state, makeCtx());
+  } finally {
+    syncing = false;
+  }
+}
+
+async function enterRemote(me) {
+  if (!previewState) previewState = app.state;
+  const base = createState(makeCtx());
+  app.state = { ...base, user: { signedIn: true, mode: "backend", email: me.email, name: me.name }, settings: { ...base.settings, ...previewState.settings } };
+  await sync();
+}
+
+function leaveRemote() {
+  if (previewState) app.state = previewState;
+  previewState = null;
+  app.state.user = { signedIn: false, mode: null, email: null, name: null };
+}
+
+// Runs a backend call, resyncs and re-renders; failures are shown, never swallowed.
+async function remote(call, { full = false } = {}) {
+  try {
+    await call();
+    await sync();
+  } catch (err) {
+    if (err.status === 401) { leaveRemote(); render(); return; }
+    alert("백엔드 요청 실패: " + (err.detail || err.message));
+  }
+  commit({ full });
 }
 
 // ---------- rendering ----------
@@ -131,6 +180,13 @@ function closeModal() {
 }
 
 function playModal(line) {
+  const build = line.builds[0];
+  if (isRemote() && build && build.id) {
+    // Served by the backend under a CSP sandbox: generated code never gets the console's origin.
+    openModal('<div class="modal play" role="dialog" aria-modal="true" aria-label="' + esc(line.title) + '"><div class="playBar"><strong>' + esc(line.title) + " · v" + esc(build.version) + '</strong><button class="btn small" data-action="close-modal">닫기</button></div><iframe sandbox="allow-scripts" title="' + esc(line.title) + '"></iframe></div>');
+    document.querySelector("#modalRoot iframe").src = app.state.settings.backendUrl.replace(/\/+$/, "") + "/builds/" + encodeURIComponent(build.id) + "/play";
+    return;
+  }
   openModal('<div class="modal play" role="dialog" aria-modal="true" aria-label="' + esc(line.title) + '"><div class="playBar"><strong>' + esc(line.title) + " · v" + esc(line.builds[0] ? line.builds[0].version : "-") + '</strong><button class="btn small" data-action="close-modal">닫기</button></div><iframe sandbox="allow-scripts" title="' + esc(line.title) + '"></iframe></div>');
   document.querySelector("#modalRoot iframe").srcdoc = buildGame(line);
 }
@@ -237,8 +293,19 @@ const actions = {
     if (!api.configured()) { actions["preview-login"](); return; }
     status.textContent = "백엔드 확인 중…";
     try {
-      await api.health();
-      location.href = api.loginUrl(location.origin + location.pathname);
+      const health = await api.health();
+      if (health.google_oauth) {
+        location.href = api.loginUrl(location.origin + location.pathname);
+        return;
+      }
+      if (!health.dev_login) {
+        status.textContent = "백엔드에 Google OAuth가 아직 설정되지 않았습니다 (AI_FACTORY_GOOGLE_CLIENT_ID/SECRET).";
+        return;
+      }
+      const email = prompt("개발용 로그인 (AI_FACTORY_DEV_LOGIN=1) 이메일", "ceo@localhost");
+      if (!email) return;
+      await enterRemote(await api.devLogin(email));
+      commit({ full: true });
     } catch (err) {
       status.textContent = "백엔드에 연결할 수 없습니다 (" + err.detail + "). 프리뷰로 둘러볼 수 있습니다.";
     }
@@ -247,6 +314,66 @@ const actions = {
     if (app.state.user.mode === "backend") { try { await api.logout(); } catch { /* already signed out */ } }
     app.state.user = { signedIn: false, mode: null, email: null, name: null };
     commit({ full: true });
+  },
+};
+
+// Backend-mode overrides: the server Leader owns production state.
+const remoteActions = {
+  "build-idea"(id) {
+    remote(async () => {
+      try {
+        const res = await api.buildIdea(id);
+        app.ui.tab = "lines";
+        app.ui.lineId = res.lineId;
+      } catch (err) {
+        if (err.status === 409) { alert("병렬 생산라인 한도에 도달했습니다."); return; }
+        throw err;
+      }
+    });
+  },
+  "line-autopilot"(id) { const l = lineById(id); remote(() => api.setAutopilot(id, !l.autopilot)); },
+  "line-resume"(id) { remote(() => api.setAutopilot(id, true)); },
+  "line-step"(id) { remote(() => api.tickLine(id)); },
+  "line-ff"(id) { remote(() => api.runLine(id)); },
+  approve(id) { remote(() => api.approve(id)); },
+  "emp-reauth"(id) { remote(() => api.verifyConnection(id)); },
+  "emp-remove"(id) {
+    const e = empById(id);
+    if (!confirm(e.name + " 연결과 Vault 자격증명을 삭제할까요?")) return;
+    remote(() => api.deleteConnection(id));
+  },
+  async logout() {
+    try { await api.logout(); } catch { /* already signed out */ }
+    leaveRemote();
+    commit({ full: true });
+  },
+};
+
+const remoteForms = {
+  topic(form) {
+    const fd = new FormData(form);
+    const topic = String(fd.get("topic") || "").trim();
+    if (!topic) return;
+    app.ui.editingTopic = false;
+    remote(() => api.createProject({ topic, genre: fd.get("genre"), platform: fd.get("platform"), notes: fd.get("notes") || "" }));
+  },
+  feedback(form) {
+    const text = String(new FormData(form).get("text") || "").trim();
+    if (text) remote(() => api.feedback(form.dataset.id, text));
+  },
+  revision(form) {
+    const text = String(new FormData(form).get("text") || "").trim();
+    if (!text) { form.querySelector("input").focus(); return; }
+    remote(() => api.revise(form.dataset.id, text));
+  },
+  settings(form) {
+    const fd = new FormData(form);
+    remote(() => api.patchSettings({
+      policy: fd.get("policy"),
+      max_parallel: clampInt(fd.get("maxParallel"), 1, 10),
+      auto_shortlist: clampInt(fd.get("autoShortlist"), 1, 10),
+      workers_per_line: clampInt(fd.get("workersPerLine"), 1, 8),
+    }));
   },
 };
 
@@ -321,7 +448,7 @@ const forms = {
       commit();
     };
 
-    if (auth === "local") {
+    if (auth === "local" && !isRemote()) {
       status.textContent = "로컬 엔드포인트 헬스체크 중…";
       const probe = await probeLocalEndpoint(endpoint || p.base_url);
       if (probe.ok) install({ connectionMode: "verified", endpoint }, "health_check 통과 · 모델 " + probe.models.length + "개");
@@ -344,12 +471,10 @@ const forms = {
       if (!apiKey && auth === "api_key") { status.textContent = "API Key를 입력하세요."; return; }
       status.textContent = "Vault 저장 · health_check · quota_probe 중…";
       const res = await api.connectProvider({ catalog_id: p.id, auth_type: auth, api_key: apiKey || null, endpoint: endpoint || null });
-      install({ connectionMode: "backend", credentialRef: res.credential_ref }, "Vault 참조 " + res.credential_ref + " · " + res.status);
-      const e = empById(p.id);
-      if (e) {
-        e.lastVerified = res.last_verified ? Date.parse(res.last_verified) : null;
-        if (res.status !== "online") e.status = res.status;
-      }
+      await sync();
+      closeModal();
+      commit();
+      if (res.status !== "online") alert(p.name + " 연결 상태: " + res.status + (res.last_error ? " · " + res.last_error : ""));
     } catch (err) {
       status.textContent = err.status === 501 ? "이 provider의 OAuth adapter는 아직 준비 중입니다. API key 방식을 사용하세요." : "연결 실패: " + (err.detail || err.message);
     }
@@ -365,7 +490,7 @@ function bindEvents() {
   document.addEventListener("click", (ev) => {
     const el = ev.target.closest("[data-action]");
     if (!el || el.disabled) return;
-    const fn = actions[el.dataset.action];
+    const fn = (isRemote() && remoteActions[el.dataset.action]) || actions[el.dataset.action];
     if (!fn) return;
     ev.preventDefault();
     app.ctx = makeCtx();
@@ -378,10 +503,11 @@ function bindEvents() {
   document.addEventListener("submit", (ev) => {
     const form = ev.target;
     const name = form.id === "topicForm" ? "topic" : form.dataset.form;
-    if (!forms[name]) return;
+    const fn = (isRemote() && remoteForms[name]) || forms[name];
+    if (!fn) return;
     ev.preventDefault();
     app.ctx = makeCtx();
-    forms[name](form);
+    fn(form);
   });
   document.addEventListener("change", (ev) => {
     const el = ev.target;
@@ -408,8 +534,21 @@ function userIsTyping() {
   return a && a.closest("#view") && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName);
 }
 
-function tick() {
+async function tick() {
   if (!app.state.user.signedIn) return;
+  if (isRemote()) {
+    // The server autopilot advances lines; the console polls its snapshot.
+    if (++tickCount % 3) return;
+    try {
+      await sync();
+    } catch (err) {
+      if (err.status === 401) { leaveRemote(); render(); }
+      return;
+    }
+    if (LIVE_TABS.has(app.ui.tab) && !userIsTyping()) renderView();
+    else renderNav();
+    return;
+  }
   app.ctx = makeCtx();
   if (app.state.settings.autopilot) tickFactory(app.state, app.ctx);
   save();
@@ -418,14 +557,15 @@ function tick() {
 }
 
 async function restoreBackendSession() {
-  if (!api.configured()) return;
-  try {
-    const me = await api.me();
-    app.state.user = { signedIn: true, mode: "backend", email: me.email, name: me.name };
-    addLog(app.state, makeCtx(), "AUTH", me.email + " 백엔드 세션 복원");
-  } catch (err) {
-    if (app.state.user.mode === "backend") app.state.user = { signedIn: false, mode: null, email: null, name: null };
+  if (app.state.user.mode === "backend") app.state.user = { signedIn: false, mode: null, email: null, name: null };
+  if (api.configured()) {
+    try {
+      await enterRemote(await api.me());
+    } catch {
+      /* not signed in to the backend: stay in preview */
+    }
   }
+  if (/[?&]login=/.test(location.search)) history.replaceState(null, "", location.pathname);
 }
 
 async function boot() {
@@ -438,6 +578,7 @@ async function boot() {
   app.ctx = makeCtx();
   const saved = readJson(STATE_KEY);
   app.state = saved && saved.version === STATE_VERSION ? saved : createState(app.ctx);
+  if (!app.state.settings.backendUrl && location.pathname.startsWith("/console")) app.state.settings.backendUrl = location.origin;
   app.ui = Object.assign({ tab: "dashboard", lineId: null, marketFilter: "recommended" }, readJson(UI_KEY) || {});
   await restoreBackendSession();
   bindEvents();
