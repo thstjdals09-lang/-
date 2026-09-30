@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from . import catalog, db, vault
 from .auth import User, csrf_guard, current_user, pkce_pair, safe_return_to
-from .providers import AdapterUnavailable, ProviderAdapter, ProviderError, build_adapter
+from .providers import NON_CHAT, AdapterUnavailable, ProviderAdapter, ProviderError, build_adapter, choose_model
 
 router = APIRouter(prefix="/providers", tags=["providers"], dependencies=[Depends(csrf_guard)])
 
@@ -106,10 +106,11 @@ def verify(conn: sqlite3.Connection, user_id: str, row: sqlite3.Row, entry: dict
         "UPDATE provider_connections SET status='online', models=?, last_verified=?, last_error=NULL WHERE id=?",
         (json.dumps(health.models[:200]), _iso(now), row["id"]),
     )
-    # A model the provider does not serve would fail every task: pick one it actually lists.
-    if health.models and row["model"] not in health.models:
-        preferred = next((m for m in health.models if entry.get("default_model") and m.startswith(str(entry["default_model"]).split(":")[0])), health.models[0])
-        conn.execute("UPDATE provider_connections SET model=? WHERE id=?", (preferred, row["id"]))
+    # A model the provider does not serve (or a speech/embedding model) would fail every task.
+    if health.models and (row["model"] not in health.models or NON_CHAT.search(row["model"] or "")):
+        picked = choose_model(entry, health.models)
+        if picked:
+            conn.execute("UPDATE provider_connections SET model=? WHERE id=?", (picked, row["id"]))
     if quota and quota.limit:
         used = max(0.0, quota.limit - (quota.remaining if quota.remaining is not None else quota.limit))
         conn.execute(

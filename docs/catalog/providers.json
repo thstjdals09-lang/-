@@ -53,7 +53,8 @@
         "llama.cpp를 설치하고 GGUF 모델을 받습니다",
         "llama-server -m model.gguf --port 8080 실행",
         "엔드포인트 http://127.0.0.1:8080/v1 로 연결"
-      ]
+      ],
+      "preferred_models": []
     },
     {
       "id": "local-ollama",
@@ -104,6 +105,13 @@
         "Ollama 설치",
         "ollama pull qwen2.5-coder",
         "엔드포인트 http://127.0.0.1:11434/v1 로 연결"
+      ],
+      "preferred_models": [
+        "qwen2.5-coder",
+        "qwen3",
+        "qwen2.5",
+        "llama3",
+        "gemma"
       ]
     },
     {
@@ -116,7 +124,7 @@
         "api_key"
       ],
       "base_url": "https://generativelanguage.googleapis.com/v1beta",
-      "default_model": "gemini-2.5-flash",
+      "default_model": "gemini-flash-latest",
       "categories": [
         "coding",
         "planning",
@@ -157,6 +165,13 @@
         "Google 계정으로 Google AI Studio 로그인",
         "'Create API key' 클릭 후 키 복사",
         "아래에 붙여넣기 (AIza…로 시작)"
+      ],
+      "preferred_models": [
+        "gemini-flash-latest",
+        "gemini-3",
+        "gemini-2.5-flash",
+        "gemini-pro-latest",
+        "gemini-2.5-pro"
       ]
     },
     {
@@ -208,6 +223,11 @@
         "Cerebras Cloud 가입/로그인",
         "API Keys 메뉴에서 키 생성",
         "아래에 붙여넣기 (csk-…로 시작)"
+      ],
+      "preferred_models": [
+        "gpt-oss-120b",
+        "qwen-3",
+        "llama"
       ]
     },
     {
@@ -220,7 +240,7 @@
         "api_key"
       ],
       "base_url": "https://api.groq.com/openai/v1",
-      "default_model": "llama-3.3-70b-versatile",
+      "default_model": "openai/gpt-oss-120b",
       "categories": [
         "coding",
         "planning"
@@ -259,6 +279,13 @@
         "GroqCloud 로그인 (Google/GitHub 계정 가능)",
         "'Create API Key' 클릭 후 복사",
         "아래에 붙여넣기 (gsk_…로 시작)"
+      ],
+      "preferred_models": [
+        "openai/gpt-oss-120b",
+        "llama-3.3-70b",
+        "qwen/qwen3",
+        "openai/gpt-oss-20b",
+        "llama"
       ]
     },
     {
@@ -312,6 +339,9 @@
       "key_steps": [
         "'OpenRouter로 로그인' 버튼 → 승인하면 키가 자동으로 서버 Vault에 저장",
         "또는 Keys 페이지에서 직접 만들어 붙여넣기 (sk-or-…)"
+      ],
+      "preferred_models": [
+        "openrouter/free"
       ]
     },
     {
@@ -365,6 +395,11 @@
         "Cloudflare 로그인",
         "API Tokens → 'Workers AI' 템플릿으로 토큰 생성",
         "대시보드 우측의 Account ID와 토큰을 아래에 입력"
+      ],
+      "preferred_models": [
+        "@cf/meta/llama-3.3-70b",
+        "@cf/qwen",
+        "@cf/openai/gpt-oss"
       ]
     },
     {
@@ -416,6 +451,11 @@
         "Mistral 콘솔 로그인",
         "무료 Experiment 플랜 선택 후 API Key 생성",
         "아래에 붙여넣기"
+      ],
+      "preferred_models": [
+        "mistral-small-latest",
+        "mistral-medium-latest",
+        "codestral-latest"
       ]
     },
     {
@@ -467,6 +507,11 @@
         "GitHub 로그인",
         "Fine-grained token 생성 → Permissions에서 'Models: Read' 선택",
         "아래에 붙여넣기 (github_pat_…)"
+      ],
+      "preferred_models": [
+        "openai/gpt-4.1-mini",
+        "openai/gpt-4.1",
+        "meta/"
       ]
     },
     {
@@ -521,6 +566,12 @@
         "Hugging Face 로그인",
         "Access Tokens → 'Make calls to Inference Providers' 권한으로 생성",
         "아래에 붙여넣기 (hf_…)"
+      ],
+      "preferred_models": [
+        "Qwen/",
+        "openai/gpt-oss",
+        "meta-llama/Llama-3.3",
+        "deepseek-ai/"
       ]
     },
     {
@@ -571,7 +622,8 @@
       "key_steps": [
         "ComfyUI 실행 (기본 포트 8188)",
         "어댑터 준비 중"
-      ]
+      ],
+      "preferred_models": []
     },
     {
       "id": "local-audio",
@@ -621,7 +673,8 @@
       "key_steps": [
         "Piper/whisper.cpp 서버 실행",
         "어댑터 준비 중"
-      ]
+      ],
+      "preferred_models": []
     },
     {
       "id": "custom-endpoint",
@@ -671,7 +724,8 @@
       "key_steps": [
         "OpenAI 호환 서버 주소(…/v1) 입력",
         "필요하면 키 입력"
-      ]
+      ],
+      "preferred_models": []
     },
     {
       "id": "anthropic",
@@ -724,6 +778,10 @@
         "Anthropic Console 로그인 (유료)",
         "API Keys에서 키 생성",
         "아래에 붙여넣기 (sk-ant-…)"
+      ],
+      "preferred_models": [
+        "claude-sonnet",
+        "claude-opus"
       ]
     }
   ]

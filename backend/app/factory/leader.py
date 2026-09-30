@@ -19,7 +19,7 @@ from pathlib import Path
 
 from .. import catalog, db, routing, vault
 from ..connections import next_reset
-from ..providers import AdapterUnavailable, build_adapter
+from ..providers import NON_CHAT, AdapterUnavailable, build_adapter, choose_model
 from . import ai_ideation, games, runtime_qa
 from .executor import SIM_ID, SIM_NAME, AllProvidersFailed, TaskContext, build_prompt, extract_game, qa_verdict, run_with_failover, simulate, to_file_content
 from .ideation import generate_ideas, slugify
@@ -202,7 +202,9 @@ class Factory:
                 (user_id, a.connection_id, task_id, a.tokens, 0, a.latency_ms, "ok" if a.ok else "error", a.error_kind),
             )
             if not a.ok:
-                if a.error_kind == "auth_error":
+                if a.error_kind == "model_unavailable":
+                    self._switch_model(conn, user_id, a.connection_id, line_id)
+                elif a.error_kind == "auth_error":
                     conn.execute("UPDATE provider_connections SET status='auth_required', last_error='auth_error' WHERE id=?", (a.connection_id,))
                 elif a.error_kind == "quota_exhausted":
                     conn.execute("UPDATE provider_connections SET quota_used=COALESCE(quota_limit, quota_used) WHERE id=?", (a.connection_id,))
@@ -223,6 +225,38 @@ class Factory:
             self.log(conn, user_id, "FAILOVER", f"{chain} → {attempts[-1].name} handoff", line_id)
             if line_id:
                 self.message(conn, line_id, "handoff", failed[-1].name, attempts[-1].name, f"{failed[-1].error_kind} 발생으로 작업 인계", task_id)
+
+    def _switch_model(self, conn, user_id, connection_id, line_id=None) -> str | None:
+        """The provider retired or refused the model: move this connection to another served model."""
+        row = conn.execute("SELECT * FROM provider_connections WHERE id=?", (connection_id,)).fetchone()
+        entry = catalog.provider(self.catalog_dir, row["catalog_id"]) if row else None
+        if not row or not entry:
+            return None
+        tried = set(json.loads(row["last_error"] or "[]") if (row["last_error"] or "").startswith("[") else [])
+        tried.add(row["model"])
+        picked = choose_model(entry, json.loads(row["models"] or "[]"), exclude=tried)
+        if picked:
+            conn.execute("UPDATE provider_connections SET model=?, last_error=? WHERE id=?", (picked, json.dumps(sorted(tried)), connection_id))
+            self.log(conn, user_id, "MODEL SWITCH", f"{entry['name']} · {row['model']} 사용 불가 → {picked}로 자동 변경", line_id)
+        else:
+            conn.execute("UPDATE provider_connections SET status='offline', last_error=? WHERE id=?", ("no usable model", connection_id))
+            self.log(conn, user_id, "MODEL SWITCH", f"{entry['name']} · 사용 가능한 대화 모델이 없어 배정 중단", line_id)
+        return picked
+
+    def recover_on_startup(self, conn) -> dict:
+        """After a restart nothing is really running: interrupted tasks go back to the queue, and
+        connections stuck on a non-chat or unlisted model are moved to a served chat model."""
+        tasks = conn.execute("UPDATE tasks SET status='ready' WHERE status='in_progress'").rowcount
+        fixed = 0
+        for row in conn.execute("SELECT * FROM provider_connections").fetchall():
+            entry = catalog.provider(self.catalog_dir, row["catalog_id"])
+            models = json.loads(row["models"] or "[]")
+            if entry and models and (row["model"] not in models or NON_CHAT.search(row["model"] or "")):
+                picked = choose_model(entry, models)
+                if picked and picked != row["model"]:
+                    conn.execute("UPDATE provider_connections SET model=? WHERE id=?", (picked, row["id"]))
+                    fixed += 1
+        return {"tasks_requeued": tasks, "models_fixed": fixed}
 
     def execute(self, conn, user_id, line_id, task: dict, ctx: TaskContext, policy: str) -> tuple[str, str, str]:
         """Returns (text, connection_id, worker_name). Raises AllProvidersFailed when stuck."""

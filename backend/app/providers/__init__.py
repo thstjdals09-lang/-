@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import httpx
 
 from .base import (
@@ -20,8 +22,28 @@ from .openai_compat import CloudflareAdapter, OpenAICompatibleAdapter, OpenRoute
 
 __all__ = [
     "ErrorInfo", "ExecuteRequest", "ExecuteResult", "HealthResult", "ProviderAdapter", "ProviderError",
-    "QuotaInfo", "Usage", "classify_error", "build_adapter", "AdapterUnavailable",
+    "QuotaInfo", "Usage", "classify_error", "build_adapter", "AdapterUnavailable", "choose_model",
 ]
+
+
+NON_CHAT = re.compile(r"(tts|whisper|orpheus|guard|embed|image|imagen|audio|transcrib|moderation|rerank|veo|lyria|live|robotics|computer-use)", re.I)
+
+
+def choose_model(entry: dict, models: list[str], exclude: set[str] | None = None) -> str | None:
+    """Picks a chat model the provider actually serves: catalog default, then preferred prefixes,
+    then any listed model that is not speech/embedding/image/safety-only."""
+    exclude = exclude or set()
+    usable = [m for m in models if m not in exclude]
+    if not usable:
+        return None
+    default = entry.get("default_model")
+    if default in usable and not NON_CHAT.search(default):
+        return default
+    for prefix in entry.get("preferred_models") or []:
+        for m in usable:
+            if m.startswith(prefix) and not NON_CHAT.search(m):
+                return m
+    return next((m for m in usable if not NON_CHAT.search(m)), usable[0])
 
 
 class AdapterUnavailable(RuntimeError):

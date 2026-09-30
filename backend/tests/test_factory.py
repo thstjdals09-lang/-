@@ -311,3 +311,42 @@ def test_relative_workspace_paths_never_commit_into_an_enclosing_repository(tmp_
     assert subprocess.run(["git", "-C", str(outer), "rev-parse", "HEAD"], capture_output=True, text=True).stdout == before
     assert "merge ai-factory/p/l/a/s-t" in "\n".join(ws.log())
     assert ws.read("x.md") == "hello"
+
+
+def test_retired_model_is_switched_automatically(signed_in, http):
+    models = {"models": [{"name": "models/gemini-flash-latest"}, {"name": "models/gemini-3-flash-preview"}, {"name": "models/gemini-2.5-flash-preview-tts"}]}
+    http.add("GET", "generativelanguage.googleapis.com/v1beta/models", lambda r: httpx.Response(200, json=models))
+    res = signed_in.post("/providers/connections", json={"catalog_id": "gemini", "auth_type": "api_key", "api_key": "AIza-test-1234567890"}, headers=CSRF).json()
+    assert res["model"] == "gemini-flash-latest"
+    used = []
+
+    def generate(req):
+        model = str(req.url).split("/models/")[1].split(":")[0]
+        used.append(model)
+        if model == "gemini-flash-latest":
+            return httpx.Response(404, text='{"error":{"message":"This model models/gemini-flash-latest is no longer available to new users."}}')
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": "ok\nRESULT: PASS"}]}}]})
+
+    http.add("POST", ":generateContent", generate)
+    signed_in.post("/projects", json={"topic": "좀비"}, headers=CSRF)
+    line_id = _lines(signed_in)[0]["id"]
+    signed_in.post(f"/lines/{line_id}/tick", headers=CSRF)
+    signed_in.post(f"/lines/{line_id}/tick", headers=CSRF)
+    conn = signed_in.get("/providers/connections").json()[0]
+    assert conn["model"] == "gemini-3-flash-preview"  # never the TTS model
+    assert any(l["type"] == "MODEL SWITCH" for l in signed_in.get("/logs").json())
+    assert "gemini-3-flash-preview" in used
+
+
+def test_restart_requeues_interrupted_tasks(signed_in):
+    from app.factory.api import get_factory
+
+    signed_in.post("/projects", json={"topic": "좀비"}, headers=CSRF)
+    line_id = _lines(signed_in)[0]["id"]
+    signed_in.post(f"/lines/{line_id}/tick", headers=CSRF)
+    with db.transaction() as conn:
+        conn.execute("UPDATE tasks SET status='in_progress' WHERE line_id=? AND status='ready'", (line_id,))
+        stuck = conn.execute("SELECT COUNT(*) FROM tasks WHERE status='in_progress'").fetchone()[0]
+        assert stuck > 0
+        assert get_factory(signed_in.app).recover_on_startup(conn)["tasks_requeued"] == stuck
+    assert signed_in.post(f"/lines/{line_id}/tick", headers=CSRF).json()["executed"] > 0

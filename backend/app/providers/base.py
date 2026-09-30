@@ -76,9 +76,15 @@ class ProviderError(RuntimeError):
         self.status = status
 
 
+MODEL_GONE_HINTS = ("no longer available", "decommissioned", "deprecated", "does not exist", "model_not_found",
+                    "not found for api version", "terms acceptance", "model_terms_required", "unknown model", "invalid model")
+
+
 def classify_error(status: int | None, body: str = "") -> ErrorInfo:
     """Shared classifier. Mirrors classifyError in docs/js/router.js and adds body hints."""
     text = (body or "").lower()
+    if status in (400, 403, 404) and "model" in text and any(h in text for h in MODEL_GONE_HINTS):
+        return ErrorInfo("model_unavailable", True)
     if status == 429:
         if "quota" in text and ("day" in text or "exceeded" in text):
             return ErrorInfo("quota_exhausted", True, 3600)

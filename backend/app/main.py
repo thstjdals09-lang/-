@@ -113,6 +113,10 @@ def _autopilot_loop(app: FastAPI, stop: threading.Event, interval: float) -> Non
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     init_db()
+    from . import db as _db
+
+    with _db.transaction() as conn:
+        factory_api.get_factory(application).recover_on_startup(conn)
     stop = threading.Event()
     interval = float(os.environ.get("AI_FACTORY_AUTOPILOT_SECONDS", "5"))
     worker = None
