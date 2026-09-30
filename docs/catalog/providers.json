@@ -342,7 +342,9 @@
       ],
       "preferred_models": [
         "openrouter/free"
-      ]
+      ],
+      "model_pattern": "(:free$)|(^openrouter/free$)",
+      "default_alias": true
     },
     {
       "id": "cloudflare",

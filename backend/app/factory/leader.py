@@ -251,7 +251,8 @@ class Factory:
         for row in conn.execute("SELECT * FROM provider_connections").fetchall():
             entry = catalog.provider(self.catalog_dir, row["catalog_id"])
             models = json.loads(row["models"] or "[]")
-            if entry and models and (row["model"] not in models or NON_CHAT.search(row["model"] or "")):
+            allowed_alias = entry and entry.get("default_alias") and row["model"] == entry.get("default_model")
+            if entry and models and not allowed_alias and (row["model"] not in models or NON_CHAT.search(row["model"] or "")):
                 picked = choose_model(entry, models)
                 if picked and picked != row["model"]:
                     conn.execute("UPDATE provider_connections SET model=? WHERE id=?", (picked, row["id"]))

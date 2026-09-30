@@ -33,10 +33,14 @@ def choose_model(entry: dict, models: list[str], exclude: set[str] | None = None
     """Picks a chat model the provider actually serves: catalog default, then preferred prefixes,
     then any listed model that is not speech/embedding/image/safety-only."""
     exclude = exclude or set()
-    usable = [m for m in models if m not in exclude]
+    default = entry.get("default_model")
+    # Some keys can spend money on any listed model (OpenRouter): only the catalog's free pattern is allowed.
+    allowed = re.compile(entry["model_pattern"]) if entry.get("model_pattern") else None
+    usable = [m for m in models if m not in exclude and (allowed is None or allowed.search(m))]
+    if default and entry.get("default_alias") and default not in exclude:
+        return default  # a routing alias the provider serves even though it is not in the model list
     if not usable:
         return None
-    default = entry.get("default_model")
     if default in usable and not NON_CHAT.search(default):
         return default
     for prefix in entry.get("preferred_models") or []:

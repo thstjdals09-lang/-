@@ -158,3 +158,13 @@ def test_openrouter_login_rejects_another_session(signed_in, http):
     back = signed_in.get(callback.path, params={"code": "x"}, follow_redirects=False)
     assert "connect_error=session_mismatch" in back.headers["location"]
     assert signed_in.get("/providers/connections").json() == []
+
+
+def test_openrouter_never_switches_to_a_paid_model():
+    from app.providers import choose_model
+
+    entry = catalog.provider(config.load().catalog_dir, "openrouter")
+    listed = ["openai/gpt-6.1-sol-pro", "anthropic/claude-x", "meta-llama/llama-4:free", "qwen/qwen3:free"]
+    assert choose_model(entry, listed) == "openrouter/free"  # router alias kept even though it is not listed
+    assert choose_model(entry, listed, exclude={"openrouter/free"}) in {"meta-llama/llama-4:free", "qwen/qwen3:free"}
+    assert choose_model(entry, ["openai/gpt-6.1-sol-pro"], exclude={"openrouter/free"}) is None  # nothing free: stop, never pay

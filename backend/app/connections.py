@@ -107,7 +107,8 @@ def verify(conn: sqlite3.Connection, user_id: str, row: sqlite3.Row, entry: dict
         (json.dumps(health.models[:200]), _iso(now), row["id"]),
     )
     # A model the provider does not serve (or a speech/embedding model) would fail every task.
-    if health.models and (row["model"] not in health.models or NON_CHAT.search(row["model"] or "")):
+    is_alias = entry.get("default_alias") and row["model"] == entry.get("default_model")
+    if health.models and not is_alias and (row["model"] not in health.models or NON_CHAT.search(row["model"] or "")):
         picked = choose_model(entry, health.models)
         if picked:
             conn.execute("UPDATE provider_connections SET model=? WHERE id=?", (picked, row["id"]))
