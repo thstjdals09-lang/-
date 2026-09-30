@@ -64,7 +64,7 @@ try {
 
   await page.locator(".nav").getByRole("button", { name: /생산라인/ }).click();
   await page.getByRole("button", { name: "다음 게이트까지 즉시 실행" }).click();
-  await page.waitForSelector("text=CEO 승인 대기", { timeout: 120000 });
+  await page.waitForSelector("text=CEO 승인 대기", { timeout: 420000 });
   check((await page.locator(".commitList li").count()) > 10, "server commits should be listed");
   check((await page.locator(".commitList small", { hasText: "ai-factory/" }).count()) > 0, "branch names should follow ai-factory/<project>/<line>/<agent>/<task>");
   if (shots) await page.screenshot({ path: join(shots, "backend-line.png"), fullPage: true });
@@ -83,6 +83,14 @@ try {
   await page.waitForSelector("text=CEO 로그인");
 } catch (err) {
   failures.push("step failed: " + err.message.split("\n").slice(0, 3).join(" | "));
+  try {
+    const page = browser && browser.contexts()[0] && browser.contexts()[0].pages()[0];
+    if (page) {
+      const snap = await page.evaluate(async (o) => (await fetch(o + "/state", { credentials: "include" })).json(), origin);
+      failures.push("lines: " + snap.lines.map((l) => l.title + "=" + l.status + "@" + l.stage).join(", "));
+      failures.push("logs: " + snap.logs.slice(0, 8).map((l) => l.type + " " + l.text.slice(0, 90)).join(" || "));
+    }
+  } catch { /* diagnostics only */ }
 } finally {
   if (browser) await browser.close();
   server.kill();

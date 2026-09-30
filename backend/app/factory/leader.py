@@ -385,6 +385,7 @@ class Factory:
         if reviewer:
             self.message(conn, line["id"], "review_request", worker, reviewer, "diff 검토", task["id"])
         branch = ws.branch_name(line["project_slug"], line["slug"], worker, stage_def["id"], task["task_key"])
+        conn.commit()  # never hold the SQLite write lock across git work
         commit = ws.commit_task(branch=branch, files=files, message=f"{stage_def['id']}: {task['name']}", author=worker)
         verdict = qa_verdict(text) if task["kind"] in ("qa", "vision") and not task["repair_of"] else ("passed" if task["kind"] in ("qa", "vision") else ("tests_passed" if task["kind"] == "coding" else None))
         reviewer_conn = res["reviewer_conn"]
@@ -408,6 +409,7 @@ class Factory:
             ws.ensure(line["title"])
             html = self.current_game(ws, line)
             smoke = games.smoke_test(html)
+            conn.commit()  # runtime QA drives a browser for seconds: release the write lock first
             runtime = runtime_qa.run(html) if smoke["passed"] else {"status": "failed", "checks": [], "errors": ["static smoke failed"], "screenshot": None}
             if runtime["status"] == "failed":
                 if self._runtime_repair(conn, user_id, line, stage_def, stage_row, runtime):
@@ -421,6 +423,7 @@ class Factory:
             files = {f"builds/v{version}/index.html": html}
             if runtime["screenshot"]:
                 files[f"builds/v{version}/screenshot.png"] = runtime["screenshot"]
+            conn.commit()
             sha = ws.commit_on_main(files, f"build: v{version} ({stage_def['id']}) runtime {runtime['status']}", "Build Engineer")
             smoke = {**smoke, "runtime": runtime["status"], "runtime_checks": runtime["checks"], "runtime_errors": runtime["errors"][:5]}
             passed = smoke["passed"] and runtime["status"] != "failed"
@@ -514,6 +517,7 @@ class Factory:
         readme = (f"# {line['title']}\n\n{idea['pitch'] if idea else ''}\n\n- Version: v{version} ({label})\n"
                   "- Play: open `index.html` (or this repository's GitHub Pages site)\n- Windows: `release/windows/Play.cmd` (from the Release Build)\n"
                   "- Produced by AI Factory; every task is a merged `ai-factory/...` branch in this history.\n")
+        conn.commit()
         sha = ws.commit_on_main({"index.html": self.current_game(ws, line), "README.md": readme},
                                 f"{'release' if release else 'deploy'}: v{version} {line['title']}", "Release Manager")
         kind = "release" if release else "pages"
@@ -600,6 +604,7 @@ class Factory:
                 results = [self._execute_phase(user_id, line, stage_def, ready[0], s["policy"])]
             for task, res in zip(ready, results):
                 self._finalize_task(conn, user_id, line, stage_def, stage_row, task, res)
+                conn.commit()
         self._refresh(conn, stage_row["id"])
         open_count = conn.execute("SELECT COUNT(*) FROM tasks WHERE stage_id=? AND status!='completed'", (stage_row["id"],)).fetchone()[0]
         blocked = conn.execute("SELECT COUNT(*) FROM tasks WHERE stage_id=? AND status='blocked'", (stage_row["id"],)).fetchone()[0]
