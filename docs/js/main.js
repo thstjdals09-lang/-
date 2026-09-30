@@ -576,7 +576,8 @@ const forms = {
       commit();
     } catch (err) {
       const reasons = { 409: "이미 연결된 AI입니다.", 501: "이 AI의 로그인 연결은 준비 중입니다. API 키 방식을 사용하세요.", 503: "서버 Vault가 설정되지 않았습니다 (AI_FACTORY_VAULT_KEY)." };
-      status.textContent = reasons[err.status] || "연결 실패: " + (err.detail || err.message);
+      const details = { local_endpoints_admin_only: "로컬 AI(Ollama 등)와 직접 지정 주소는 서버 소유자 계정만 연결할 수 있습니다. Gemini·Groq 같은 클라우드 AI를 키로 연결하세요." };
+      status.textContent = details[err.detail] || reasons[err.status] || "연결 실패: " + (err.detail || err.message);
     }
   },
 };
