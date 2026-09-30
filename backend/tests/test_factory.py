@@ -293,3 +293,21 @@ def test_template_echo_is_rejected_and_marker_is_added_to_real_games(signed_in, 
     assert any(l["type"] == "GAME REJECTED" and "템플릿" in l["text"] for l in logs)
     html = signed_in.get(f"/builds/{detail['builds'][0]['id']}/play").text
     assert "OWN-GAME" in html and 'data-ai-factory-game="v2"' in html and not games.is_fallback(html)
+
+
+def test_relative_workspace_paths_never_commit_into_an_enclosing_repository(tmp_path, monkeypatch):
+    """Regression: a relative workspace root made task commits land in the enclosing repo."""
+    import os
+
+    outer = tmp_path / "outer"
+    outer.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main", str(outer)], check=True)
+    subprocess.run(["git", "-C", str(outer), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "outer"], check=True)
+    before = subprocess.run(["git", "-C", str(outer), "rev-parse", "HEAD"], capture_output=True, text=True).stdout
+    monkeypatch.chdir(outer)
+    ws = LineWorkspace(os.path.join("data", "ws"))  # relative, inside the outer repository
+    ws.ensure("t")
+    ws.commit_task(branch="ai-factory/p/l/a/s-t", files={"x.md": "hello"}, message="task", author="a")
+    assert subprocess.run(["git", "-C", str(outer), "rev-parse", "HEAD"], capture_output=True, text=True).stdout == before
+    assert "merge ai-factory/p/l/a/s-t" in "\n".join(ws.log())
+    assert ws.read("x.md") == "hello"

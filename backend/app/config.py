@@ -66,7 +66,7 @@ def load() -> Settings:
         session_days=int(os.environ.get("AI_FACTORY_SESSION_DAYS", "14")),
         dev_login=_bool("AI_FACTORY_DEV_LOGIN", False),
         catalog_dir=Path(os.environ.get("AI_FACTORY_CATALOG_DIR", str(repo_root / "docs" / "catalog"))),
-        workspace_dir=Path(os.environ.get("AI_FACTORY_WORKSPACE", "data/workspaces")),
+        workspace_dir=Path(os.environ.get("AI_FACTORY_WORKSPACE", "data/workspaces")).resolve(),
         simulate_without_providers=_bool("AI_FACTORY_SIMULATE", True),
         signup_mode=os.environ.get("AI_FACTORY_SIGNUP_MODE", "open").strip().lower(),
         allowed_emails=[e.lower() for e in _list("AI_FACTORY_ALLOWED_EMAILS", "")],

@@ -50,12 +50,15 @@ class TaskCommit:
 
 class LineWorkspace:
     def __init__(self, root: Path):
-        self.root = Path(root)
+        # Absolute paths only: git resolves relative paths from its own cwd (the line repo), so a
+        # relative worktree path would land somewhere else than where the files are written.
+        self.root = Path(root).resolve()
         self.repo = self.root / "repo"
         self.trees = self.root / "wt"
 
     def _git(self, *args: str, cwd: Path | None = None, author: str = "AI Factory", extra_env: dict | None = None) -> str:
-        env = {**os.environ, **GIT_ENV, **(extra_env or {})}
+        # Never let git walk above the line folder into an enclosing repository (e.g. the factory's own).
+        env = {**os.environ, **GIT_ENV, "GIT_CEILING_DIRECTORIES": str(self.root), **(extra_env or {})}
         cmd = ["git", "-c", f"user.name={author}", "-c", "user.email=ai-factory@localhost", "-c", "core.autocrlf=false", "-c", "core.longpaths=true", *args]
         res = subprocess.run(cmd, cwd=cwd or self.repo, env=env, capture_output=True, text=True, encoding="utf-8")
         if res.returncode != 0:
@@ -92,6 +95,9 @@ class LineWorkspace:
             self._git("branch", "-D", branch)
         self._git("worktree", "add", "-q", "-b", branch, str(tree), "main")
         try:
+            top = Path(self._git("rev-parse", "--show-toplevel", cwd=tree)).resolve()
+            if top != tree.resolve():
+                raise WorkspaceError(f"worktree mismatch: git is using {top}, expected {tree}")
             for rel, content in files.items():
                 target = _inside(tree, rel)
                 target.parent.mkdir(parents=True, exist_ok=True)
