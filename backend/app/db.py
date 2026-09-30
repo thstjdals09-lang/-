@@ -289,6 +289,12 @@ MIGRATIONS: list[str] = [
     ALTER TABLE publications ADD COLUMN version TEXT;
     ALTER TABLE ideas ADD COLUMN concept TEXT;
     """,
+    # 7 — accounts: role and the user's own GitHub integration.
+    """
+    ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'member';
+    ALTER TABLE users ADD COLUMN github_credential_id TEXT;
+    ALTER TABLE users ADD COLUMN github_login TEXT;
+    """,
 ]
 
 

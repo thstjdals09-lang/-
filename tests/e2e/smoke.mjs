@@ -36,7 +36,11 @@ async function run(viewport, label) {
   page.on("pageerror", (e) => errors.push(label + " pageerror: " + e.message));
   page.on("console", (m) => { if (m.type() === "error") errors.push(label + " console: " + m.text()); });
   await page.goto(url);
-  await page.getByRole("button", { name: /Google로 계속하기/ }).click();
+  // Google login needs a server: without one it must not silently fall back to guest mode
+  await page.getByRole("button", { name: /Google 계정으로 로그인/ }).click();
+  check(await page.getByText("계정 로그인에는 AI Factory 서버가 필요합니다").isVisible(), label + ": Google login without a server must explain, not fake a login");
+  await page.getByRole("button", { name: /게스트로 둘러보기/ }).click();
+  check(await page.getByText("게스트 · 계정 없음").isVisible(), label + ": guest mode must be labelled");
   await page.locator("#topicForm input[name=topic]").fill("홀덤");
   await page.getByRole("button", { name: "AI 공장 가동" }).click();
   await page.waitForSelector(".floorRow");

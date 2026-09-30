@@ -30,6 +30,7 @@ const TABS = [
   ["market", "AI 마켓", "AI 플러그인 마켓"],
   ["logs", "로그", "공장 로그"],
   ["settings", "설정", "설정"],
+  ["account", "내 계정", "내 계정"],
 ];
 
 const app = { state: null, ctx: null, ui: null };
@@ -70,7 +71,9 @@ async function sync() {
   if (syncing) return;
   syncing = true;
   try {
+    const account = app.state.account;
     app.state = fromSnapshot(await api.state(), app.state, makeCtx());
+    app.state.account = account;
   } finally {
     syncing = false;
   }
@@ -81,6 +84,11 @@ async function enterRemote(me) {
   const base = createState(makeCtx());
   app.state = { ...base, user: { signedIn: true, mode: "backend", email: me.email, name: me.name }, settings: { ...base.settings, ...previewState.settings } };
   await sync();
+  await refreshAccount();
+}
+
+async function refreshAccount() {
+  try { app.state.account = await api.account(); } catch { /* shown as loading */ }
 }
 
 function leaveRemote() {
@@ -131,7 +139,7 @@ function renderView() {
   const fn = {
     dashboard: floor.dashboard, ideas: floor.ideas, lines: floor.lines,
     team: ai.team, market: ai.market,
-    review: ops.review, results: ops.results, logs: ops.logs, settings: ops.settings,
+    review: ops.review, results: ops.results, logs: ops.logs, settings: ops.settings, account: ops.account,
   }[tab[0]];
   view.innerHTML = (app.ui.flash ? '<p class="notice flash">' + esc(app.ui.flash) + "</p>" : "") + fn(app);
   mountThumbs(view);
@@ -151,7 +159,9 @@ function render() {
     '<nav class="nav" id="nav" aria-label="주요 메뉴"></nav>' +
     '<div class="sidebarFoot"><span class="dot ' + (u.mode === "backend" ? "live" : "") + '"></span>' + (u.mode === "backend" ? "Backend 연결" : "Preview 모드") + "<small>" + esc(u.email || "") + "</small></div></aside>" +
     '<main class="content"><header class="topbar"><div><div class="eyebrow">AUTONOMOUS GAME STUDIO · CEO</div><h1 id="pageTitle"></h1></div>' +
-    '<div class="actions"><span class="chip">' + esc(app.state.settings.policy.toUpperCase()) + '</span><button class="btn small" data-action="logout">로그아웃</button></div></header>' +
+    '<div class="actions"><span class="chip">' + esc(app.state.settings.policy.toUpperCase()) + "</span>" +
+    '<button class="accountChip" data-action="tab" data-id="account" title="내 계정"><span class="avatar">' + esc((u.name || u.email || "?").slice(0, 1).toUpperCase()) + "</span>" +
+    (u.mode === "backend" ? esc(u.email || "") : "게스트 · 계정 없음") + "</button></div></header>" +
     '<div id="view"></div></main></div>';
   renderView();
 }
@@ -211,7 +221,10 @@ function commit(opts = {}) {
 }
 
 const actions = {
-  tab(id) { app.ui.tab = id; app.ui.editingTopic = false; app.ui.flash = null; commit(); window.scrollTo(0, 0); },
+  tab(id) {
+    app.ui.tab = id; app.ui.editingTopic = false; app.ui.flash = null; commit(); window.scrollTo(0, 0);
+    if (id === "account" && isRemote()) refreshAccount().then(() => renderView());
+  },
   "new-topic"() { app.ui.editingTopic = true; commit(); },
   "cancel-topic"() { app.ui.editingTopic = false; commit(); },
   "open-line"(id) { app.ui.tab = "lines"; app.ui.lineId = id; app.ui.stageId = null; commit(); window.scrollTo(0, 0); },
@@ -292,7 +305,12 @@ const actions = {
   },
   async "google-login"() {
     const status = document.querySelector("[data-login-status]");
-    if (!api.configured()) { actions["preview-login"](); return; }
+    if (!api.configured()) {
+      status.textContent = "계정 로그인에는 AI Factory 서버가 필요합니다. 서버 주소를 입력하거나 게스트로 둘러보세요.";
+      const details = document.querySelector(".loginCard details");
+      if (details) details.open = true;
+      return;
+    }
     status.textContent = "백엔드 확인 중…";
     try {
       const health = await api.health();
@@ -349,9 +367,47 @@ const remoteActions = {
     leaveRemote();
     commit({ full: true });
   },
+  async "logout-all"() {
+    if (!confirm("이 계정으로 로그인된 모든 기기에서 로그아웃할까요?")) return;
+    try { await api.logoutAll(); } catch { /* session already gone */ }
+    leaveRemote();
+    commit({ full: true });
+  },
+  "export-account"() { window.open(api.exportUrl(), "_blank", "noopener"); },
+  "github-disconnect"() {
+    if (!confirm("GitHub 연결을 해제할까요? 이후 게임은 배포되지 않습니다.")) return;
+    remote(async () => { app.state.account = await api.disconnectGithub(); });
+  },
 };
 
 const remoteForms = {
+  async "github-connect"(form) {
+    const input = form.querySelector('input[name="token"]');
+    const token = input.value.trim();
+    input.value = ""; // the token only lives in this request
+    const status = form.parentElement.querySelector("[data-github-status]");
+    if (!token) return;
+    status.textContent = "GitHub에 토큰 확인 중…";
+    try {
+      app.state.account = await api.connectGithub(token);
+      commit();
+    } catch (err) {
+      const reasons = { github_token_rejected: "GitHub가 토큰을 거부했습니다.", github_token_needs_repo_scope: "토큰에 repo 권한이 없습니다. 발급 페이지에서 repo를 체크하세요." };
+      status.textContent = reasons[err.detail] || "연결 실패: " + (err.detail || err.message);
+    }
+  },
+  async "delete-account"(form) {
+    const email = String(new FormData(form).get("email") || "").trim();
+    if (!email || !confirm("정말 계정과 모든 데이터를 삭제할까요? 되돌릴 수 없습니다.")) return;
+    try {
+      await api.deleteAccount(email);
+      leaveRemote();
+      app.ui.loginFlash = "계정이 삭제되었습니다.";
+      commit({ full: true });
+    } catch (err) {
+      alert(err.detail === "confirmation_mismatch" ? "이메일이 일치하지 않습니다." : "삭제 실패: " + (err.detail || err.message));
+    }
+  },
   topic(form) {
     const fd = new FormData(form);
     const topic = String(fd.get("topic") || "").trim();
@@ -578,6 +634,7 @@ async function restoreBackendSession() {
     }
   }
   const params = new URLSearchParams(location.search);
+  if (params.get("login") === "not_allowed") app.ui.loginFlash = "이 서버는 초대된 계정만 가입할 수 있습니다.";
   if (params.get("connected")) {
     app.ui.tab = "team";
     app.ui.flash = params.get("connected") + " 로그인 연결 완료 · 상태 " + (params.get("status") || "?");

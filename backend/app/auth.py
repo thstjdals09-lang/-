@@ -37,6 +37,12 @@ class User(BaseModel):
     email: str
     name: str | None = None
     picture: str | None = None
+    role: str = "member"
+
+
+class SignupClosed(HTTPException):
+    def __init__(self):
+        super().__init__(status_code=403, detail="signup_not_allowed")
 
 
 class DevLogin(BaseModel):
@@ -67,25 +73,32 @@ def safe_return_to(return_to: str | None, settings: config.Settings) -> str:
     return fallback
 
 
-def upsert_user(conn: sqlite3.Connection, *, email: str, name: str | None, picture: str | None, google_sub: str | None) -> User:
+def upsert_user(conn: sqlite3.Connection, *, email: str, name: str | None, picture: str | None, google_sub: str | None,
+                settings: config.Settings | None = None) -> User:
+    """First sign-in creates the account (subject to the signup policy); later sign-ins update it."""
+    email = email.strip().lower()
     row = None
     if google_sub:
         row = conn.execute("SELECT * FROM users WHERE google_sub = ?", (google_sub,)).fetchone()
     if row is None:
         row = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+    role = "admin" if settings and email in settings.admin_emails else "member"
     if row is None:
+        if settings and settings.signup_mode == "allowlist" and email not in settings.allowed_emails and email not in settings.admin_emails:
+            raise SignupClosed()
         user_id = "usr_" + secrets.token_urlsafe(10)
         conn.execute(
-            "INSERT INTO users(id, google_sub, email, name, picture, last_login_at) VALUES (?,?,?,?,?,?)",
-            (user_id, google_sub, email, name, picture, _iso(_now())),
+            "INSERT INTO users(id, google_sub, email, name, picture, last_login_at, role) VALUES (?,?,?,?,?,?,?)",
+            (user_id, google_sub, email, name, picture, _iso(_now()), role),
         )
     else:
         user_id = row["id"]
+        role = "admin" if role == "admin" else row["role"]
         conn.execute(
-            "UPDATE users SET google_sub = COALESCE(?, google_sub), name = COALESCE(?, name), picture = COALESCE(?, picture), last_login_at = ? WHERE id = ?",
-            (google_sub, name, picture, _iso(_now()), user_id),
+            "UPDATE users SET google_sub = COALESCE(?, google_sub), name = COALESCE(?, name), picture = COALESCE(?, picture), last_login_at = ?, role = ? WHERE id = ?",
+            (google_sub, name, picture, _iso(_now()), role, user_id),
         )
-    return User(id=user_id, email=email, name=name, picture=picture)
+    return User(id=user_id, email=email, name=name, picture=picture, role=role)
 
 
 def create_session(conn: sqlite3.Connection, user_id: str, settings: config.Settings) -> str:
@@ -118,7 +131,7 @@ def current_user(request: Request) -> User:
         ).fetchone()
     if row is None:
         raise HTTPException(status_code=401, detail="session_expired")
-    return User(id=row["id"], email=row["email"], name=row["name"], picture=row["picture"])
+    return User(id=row["id"], email=row["email"], name=row["name"], picture=row["picture"], role=row["role"])
 
 
 def csrf_guard(request: Request) -> None:
@@ -164,7 +177,7 @@ def validate_id_token(id_token: str, client_id: str, now: float | None = None) -
 @router.get("/config")
 def auth_config(request: Request) -> dict:
     s: config.Settings = request.app.state.settings
-    return {"google": s.google_configured, "dev_login": s.dev_login}
+    return {"google": s.google_configured, "dev_login": s.dev_login, "signup": s.signup_mode}
 
 
 @router.get("/google/login")
@@ -221,9 +234,12 @@ def google_callback(request: Request, state: str, code: str | None = None, error
         raise HTTPException(status_code=502, detail="google_token_exchange_failed")
     claims = validate_id_token(res.json().get("id_token", ""), s.google_client_id)
 
-    with db.transaction() as conn:
-        user = upsert_user(conn, email=claims["email"], name=claims.get("name"), picture=claims.get("picture"), google_sub=claims["sub"])
-        token = create_session(conn, user.id, s)
+    try:
+        with db.transaction() as conn:
+            user = upsert_user(conn, email=claims["email"], name=claims.get("name"), picture=claims.get("picture"), google_sub=claims["sub"], settings=s)
+            token = create_session(conn, user.id, s)
+    except SignupClosed:
+        return RedirectResponse(row["return_to"] + "?login=not_allowed", status_code=302)
     response = RedirectResponse(row["return_to"] + "?login=ok", status_code=302)
     set_session_cookie(response, token, s)
     return response
@@ -236,7 +252,7 @@ def dev_login(payload: DevLogin, request: Request, response: Response) -> User:
     if not s.dev_login:
         raise HTTPException(status_code=404, detail="not_found")
     with db.transaction() as conn:
-        user = upsert_user(conn, email=payload.email, name=payload.name, picture=None, google_sub=None)
+        user = upsert_user(conn, email=payload.email, name=payload.name, picture=None, google_sub=None, settings=s)
         token = create_session(conn, user.id, s)
     set_session_cookie(response, token, s)
     return user

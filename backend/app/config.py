@@ -31,7 +31,15 @@ class Settings:
     catalog_dir: Path
     workspace_dir: Path
     simulate_without_providers: bool = True
+    signup_mode: str = "open"  # open: any Google account can sign up · allowlist: only allowed_emails
+    allowed_emails: list[str] = field(default_factory=list)
+    admin_emails: list[str] = field(default_factory=list)
     extra: dict = field(default_factory=dict)
+
+    @property
+    def is_local(self) -> bool:
+        host = self.public_url.split("://", 1)[-1].split("/", 1)[0].split(":", 1)[0]
+        return host in ("127.0.0.1", "localhost", "::1")
 
     @property
     def google_configured(self) -> bool:
@@ -60,4 +68,7 @@ def load() -> Settings:
         catalog_dir=Path(os.environ.get("AI_FACTORY_CATALOG_DIR", str(repo_root / "docs" / "catalog"))),
         workspace_dir=Path(os.environ.get("AI_FACTORY_WORKSPACE", "data/workspaces")),
         simulate_without_providers=_bool("AI_FACTORY_SIMULATE", True),
+        signup_mode=os.environ.get("AI_FACTORY_SIGNUP_MODE", "open").strip().lower(),
+        allowed_emails=[e.lower() for e in _list("AI_FACTORY_ALLOWED_EMAILS", "")],
+        admin_emails=[e.lower() for e in _list("AI_FACTORY_ADMIN_EMAILS", "")],
     )

@@ -108,14 +108,69 @@ export function settings(app) {
 
 export function login(app) {
   const s = app.state.settings;
+  const flash = app.ui.loginFlash ? '<p class="notice">' + esc(app.ui.loginFlash) + "</p>" : "";
   return (
     '<div class="loginShell"><div class="loginCard">' +
     '<div class="brandMark big" aria-hidden="true">AF</div><div class="eyebrow">AI FACTORY · GAME STUDIO OS</div>' +
-    "<h1>CEO 로그인</h1><p>주제만 입력하면 AI 사원들이 아이디어부터 릴리즈 빌드까지 생산합니다. 계정 기준으로 AI 사원·자격증명 참조·프로젝트·쿼터 기록을 불러옵니다.</p>" +
-    '<button class="googleBtn" data-action="google-login"><span aria-hidden="true">G</span> Google로 계속하기</button>' +
-    '<p class="status" data-login-status>' + (s.backendUrl ? "백엔드: " + esc(s.backendUrl) : "백엔드 미설정 → Google 버튼은 프리뷰 세션으로 진입합니다.") + "</p>" +
-    '<details><summary>백엔드 서버 연결</summary><form class="inlineForm" data-form="login-backend"><input name="backendUrl" type="url" placeholder="https://ai-factory.example.com" value="' + esc(s.backendUrl || "") + '"><button class="btn">저장</button></form></details>' +
-    '<button class="btn ghost" data-action="preview-login">서버 없이 프리뷰로 둘러보기</button>' +
+    "<h1>로그인</h1><p>계정마다 자기 AI(키), 프로젝트, 생산라인, 게임 배포가 따로 관리됩니다. 처음 로그인하면 계정이 만들어집니다.</p>" + flash +
+    '<button class="googleBtn" data-action="google-login"><span aria-hidden="true">G</span> Google 계정으로 로그인</button>' +
+    '<p class="status" data-login-status>' + (s.backendUrl ? "서버: " + esc(s.backendUrl) : "계정 로그인은 AI Factory 서버에서 합니다. 아래에 서버 주소를 넣거나, 이 PC에서 start-backend.cmd를 실행하세요.") + "</p>" +
+    '<details' + (s.backendUrl ? "" : " open") + '><summary>AI Factory 서버 주소</summary><form class="inlineForm" data-form="login-backend"><input name="backendUrl" type="url" placeholder="https://my-factory.example.com" value="' + esc(s.backendUrl || "") + '"><button class="btn">저장</button></form></details>' +
+    '<div class="divider"><span>또는</span></div>' +
+    '<button class="btn ghost" data-action="preview-login">게스트로 둘러보기 (계정 없음 · 시뮬레이션)</button>' +
+    '<p class="muted small">게스트 모드는 이 브라우저에만 저장되고, 실제 AI를 연결하거나 게임을 배포할 수 없습니다.</p>' +
     "</div></div>"
   );
+}
+
+export function account(app) {
+  const { state } = app;
+  if (state.user.mode !== "backend") {
+    return (
+      '<section class="panel"><div class="eyebrow">GUEST</div><h2>게스트 모드 · 계정 없음</h2>' +
+      '<p class="muted">지금은 로그인하지 않은 프리뷰입니다. 데이터는 이 브라우저에만 저장되고, AI 키 연결·실제 게임 생성·GitHub 배포는 할 수 없습니다.</p>' +
+      '<ol class="guide"><li>이 PC에서 <strong>start-backend.cmd</strong> 실행 → http://127.0.0.1:8000/console/ 에서 로그인</li><li>또는 운영 중인 AI Factory 서버 주소로 접속해 Google 계정으로 로그인</li></ol>' +
+      '<div class="actions wrap"><button class="btn primary" data-action="logout">로그인 화면으로</button><button class="btn danger" data-action="reset-all">게스트 데이터 초기화</button></div></section>'
+    );
+  }
+  const a = state.account;
+  if (!a) return empty("계정 정보를 불러오는 중입니다…");
+  const c = a.counts;
+  const stat = (label, value) => "<div><dt>" + esc(label) + "</dt><dd>" + value + "</dd></div>";
+  const ghUrl = "https://github.com/settings/tokens/new?scopes=repo&description=" + encodeURIComponent("AI Factory");
+  return (
+    '<div class="twoCol">' +
+    '<section class="panel"><div class="panelHead"><div><div class="eyebrow">PROFILE</div><h2>' + esc(a.name || a.email) + "</h2></div>" +
+    '<span class="pill ' + (a.role === "admin" ? "violet" : "neutral") + '">' + (a.role === "admin" ? "관리자" : "멤버") + "</span></div>" +
+    '<dl class="facts compact">' + stat("이메일", esc(a.email)) + stat("로그인 방식", a.signIn === "google" ? "Google" : "로컬(개발용)") +
+    stat("가입", esc(fmtTime(parseServerTime(a.createdAt)))) + stat("최근 로그인", esc(fmtTime(parseServerTime(a.lastLoginAt)))) + "</dl></section>" +
+    '<section class="panel"><div class="eyebrow">MY FACTORY</div><h2>내 사용 현황</h2><dl class="facts">' +
+    stat("연결한 AI", c.ais + " (온라인 " + c.ais_online + ")") + stat("프로젝트", c.projects) + stat("생산라인", c.lines + " (가동 " + c.running + ")") +
+    stat("빌드", c.builds) + stat("배포된 게임", c.deployed) + "</dl>" +
+    '<p class="muted small">AI 키·프로젝트·게임은 이 계정에만 보입니다. 다른 사람은 자기 계정으로 로그인해 자기 AI를 연결합니다.</p></section>' +
+    "</div>" +
+    '<section class="panel"><div class="panelHead"><div><div class="eyebrow">GITHUB · 게임 배포</div><h2>내 GitHub 연결</h2></div>' +
+    (a.github.connected ? '<span class="pill good">@' + esc(a.github.login) + " 연결됨</span>" : '<span class="pill warn">미연결</span>') + "</div>" +
+    (a.github.connected
+      ? '<p class="muted">완성된 게임은 <strong>@' + esc(a.github.login) + "</strong> 계정에 aif-… 저장소로 올라가고 GitHub Pages 링크가 만들어집니다.</p>" +
+        '<div class="actions"><button class="btn danger" data-action="github-disconnect">GitHub 연결 해제</button></div>'
+      : '<p class="muted">연결하지 않으면 게임은 이 서버에만 저장되고 배포 링크가 만들어지지 않습니다. 게임은 내 GitHub 계정에만 올라갑니다.</p>' +
+        '<ol class="guide"><li>GitHub 로그인 후 토큰 발급 페이지 열기 (repo 권한이 미리 선택됨)</li><li>"Generate token" → 토큰 복사</li><li>아래에 붙여넣고 연결 (서버가 GitHub에 확인 후 암호화 저장)</li></ol>' +
+        '<div class="actions wrap"><a class="btn" href="' + esc(ghUrl) + '" target="_blank" rel="noopener">① GitHub 로그인 · 토큰 발급 ↗</a></div>' +
+        '<form class="inlineForm" data-form="github-connect"><input name="token" type="password" autocomplete="off" placeholder="ghp_… 또는 github_pat_…"><button class="btn primary">② 연결</button></form>' +
+        '<p class="status" data-github-status></p>') +
+    "</section>" +
+    '<section class="panel"><div class="eyebrow">SECURITY · DATA</div><h2>보안과 데이터</h2>' +
+    '<div class="actions wrap"><button class="btn" data-action="logout">로그아웃</button><button class="btn" data-action="logout-all">모든 기기에서 로그아웃</button>' +
+    '<button class="btn" data-action="export-account">내 데이터 내보내기 (JSON, 키 제외)</button></div>' +
+    '<details class="danger-zone"><summary>계정 삭제</summary><p class="muted small">AI 키, 연결한 AI, 프로젝트, 생산라인, 이 서버의 게임 저장소가 모두 삭제되고 되돌릴 수 없습니다. 이미 내 GitHub에 올라간 저장소는 GitHub에 남습니다.</p>' +
+    '<form class="inlineForm" data-form="delete-account"><input name="email" placeholder="확인을 위해 ' + esc(a.email) + ' 입력"><button class="btn danger">계정 삭제</button></form></details>' +
+    "</section>"
+  );
+}
+
+function parseServerTime(value) {
+  if (!value) return null;
+  const ms = Date.parse(String(value).replace(" ", "T") + "Z");
+  return Number.isNaN(ms) ? null : ms;
 }

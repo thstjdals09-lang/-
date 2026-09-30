@@ -11,7 +11,6 @@ from pydantic import BaseModel, Field
 from .. import db
 from ..auth import User, csrf_guard, current_user
 from ..connections import row_to_out
-from .github_sync import GitHubSync
 from .leader import DEFAULT_USER_SETTINGS, CapacityError, Factory
 
 router = APIRouter(tags=["factory"], dependencies=[Depends(csrf_guard)])
@@ -47,7 +46,7 @@ def get_factory(app) -> Factory:
     if getattr(app.state, "factory", None) is None:
         s = app.state.settings
         app.state.factory = Factory(s.catalog_dir, s.workspace_dir, simulate=s.simulate_without_providers, transport=getattr(app.state, "http_transport", None),
-                                    github=getattr(app.state, "github_sync", None) or GitHubSync.from_environment(),
+                                    github=getattr(app.state, "github_sync", None),
                                     verifier=getattr(app.state, "pages_verifier", None))
     return app.state.factory
 

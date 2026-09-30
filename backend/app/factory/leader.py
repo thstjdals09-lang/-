@@ -26,7 +26,7 @@ from .ideation import generate_ideas, slugify
 from .github_sync import GitHubSync, GitHubSyncError, RepoRef, repo_name
 from .pages_verifier import PagesVerifier
 from .workspace import LineWorkspace, WorkspaceError
-from ..github_publisher import GitHubAPIError
+from ..github_publisher import GitHubAPIError, GitHubClient
 
 FALLBACK_KIND = {"vision": "qa", "image": "design", "audio": "design"}
 GAME_PATH = "game/index.html"  # the canonical, always-playable game on main
@@ -77,8 +77,8 @@ class Factory:
         self.workspace_dir = Path(workspace_dir)
         self.simulate = simulate
         self.transport = transport
-        self.github = github
-        self.verifier = verifier or (PagesVerifier(github) if github else None)
+        self.github = github  # test/single-tenant override; normally each account uses its own GitHub
+        self.verifier = verifier
         self.studio = catalog.studio(catalog_dir)
         self.stages = self.studio["stages"]
         self._locks: dict[str, threading.Lock] = {}
@@ -567,17 +567,31 @@ class Factory:
         owner, repo = row["repository"].split("/", 1)
         return RepoRef(owner, repo, row["repository_url"])
 
+    def github_for(self, conn, user_id) -> GitHubSync | None:
+        """The account's own GitHub (token in the vault). The server token is for admin accounts only,
+        so one user's games never land in another person's GitHub."""
+        if self.github:
+            return self.github
+        row = conn.execute("SELECT role, github_credential_id FROM users WHERE id=?", (user_id,)).fetchone()
+        if row and row["github_credential_id"]:
+            token = vault.reveal(conn, user_id, row["github_credential_id"])
+            return GitHubSync(GitHubClient(token), token)
+        if row and row["role"] == "admin":
+            return GitHubSync.from_environment()
+        return None
+
     def sync_line(self, conn, user_id, line) -> RepoRef | None:
         """Pushes the line repository (full task history) to GitHub. Best effort: never blocks production."""
-        if not self.github:
+        gh = self.github_for(conn, user_id)
+        if not gh:
             return None
         conn.commit()  # no DB write lock is held during network I/O
         try:
             ref = self._repo_ref(conn, line)
             if ref is None:
                 idea = conn.execute("SELECT pitch FROM ideas WHERE id=?", (line["idea_id"],)).fetchone()
-                ref = self.github.ensure_repo(repo_name(line["project_slug"], line["slug"], line["id"]), f"AI Factory · {line['title']} · {idea['pitch'] if idea else ''}")
-            sha = self.github.push(self.workspace(user_id, line["id"]), ref)
+                ref = gh.ensure_repo(repo_name(line["project_slug"], line["slug"], line["id"]), f"AI Factory · {line['title']} · {idea['pitch'] if idea else ''}")
+            sha = gh.push(self.workspace(user_id, line["id"]), ref)
         except (GitHubSyncError, GitHubAPIError, WorkspaceError) as exc:
             self._publication(conn, line["id"], kind="repository", status="failed", detail=vault.redact(str(exc))[:300])
             self.log(conn, user_id, "GITHUB SYNC FAIL", f"{line['title']} · {vault.redact(str(exc))[:200]}", line["id"])
@@ -600,15 +614,16 @@ class Factory:
         sha = ws.commit_on_main({"index.html": self.current_game(ws, line), "README.md": readme},
                                 f"{'release' if release else 'deploy'}: v{version} {line['title']}", "Release Manager")
         kind = "release" if release else "pages"
-        if not self.github:
-            self._publication(conn, line["id"], kind=kind, status="not_configured", version=version, commit_sha=sha, detail="AI_FACTORY_GITHUB_TOKEN is not set")
-            self.log(conn, user_id, "PUBLISH WAITING", f"{line['title']} v{version} · 서버에 GitHub 토큰이 없어 로컬 저장소에만 커밋", line["id"])
+        gh = self.github_for(conn, user_id)
+        if not gh:
+            self._publication(conn, line["id"], kind=kind, status="not_configured", version=version, commit_sha=sha, detail="GitHub not connected for this account")
+            self.log(conn, user_id, "PUBLISH WAITING", f"{line['title']} v{version} · 내 계정에 GitHub가 연결되지 않아 로컬 저장소에만 커밋 (내 계정 → GitHub 연결)", line["id"])
             return {"status": "not_configured"}
         ref = self.sync_line(conn, user_id, line)
         if ref is None:
             return {"status": "failed"}
         try:
-            pages_url = self.github.enable_pages(ref)
+            pages_url = gh.enable_pages(ref)
         except (GitHubSyncError, GitHubAPIError) as exc:
             self._publication(conn, line["id"], kind=kind, status="failed", version=version, repository=f"{ref.owner}/{ref.repo}", repository_url=ref.html_url, detail=str(exc)[:300])
             self.log(conn, user_id, "PUBLISH FAIL", f"{line['title']} · {str(exc)[:200]}", line["id"])
@@ -617,7 +632,7 @@ class Factory:
                                    repository_url=ref.html_url, pages_url=pages_url, commit_sha=sha)
         self.log(conn, user_id, "DEPLOYING", f"{line['title']} v{version} {label} · Pages 빌드 확인 중 · {pages_url}", line["id"])
         conn.commit()
-        self.verifier.watch(publication_id=pub_id, user_id=user_id, line_id=line["id"], title=f"{line['title']} v{version}", ref=ref, url=pages_url, expect=sha)
+        (self.verifier or PagesVerifier(gh)).watch(publication_id=pub_id, user_id=user_id, line_id=line["id"], title=f"{line['title']} v{version}", ref=ref, url=pages_url, expect=sha)
         return {"status": "deploying", "repository_url": ref.html_url, "pages_url": pages_url}
 
     def publish_release(self, conn, user_id, line_id) -> dict:

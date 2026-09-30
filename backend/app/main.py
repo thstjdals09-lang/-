@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 import sys
 
-from . import auth, catalog, config, connections, envfile, vault
+from . import account, auth, catalog, config, connections, envfile, vault
 
 if "pytest" not in sys.modules:
     envfile.load()  # backend/.env for local runs; real environment variables always win
@@ -36,7 +36,7 @@ core = APIRouter()
 @core.get("/health")
 def health(request: Request) -> dict:
     s: config.Settings = request.app.state.settings
-    return {"status": "ok", "google_oauth": s.google_configured, "vault": vault.configured(), "dev_login": s.dev_login}
+    return {"status": "ok", "google_oauth": s.google_configured, "vault": vault.configured(), "dev_login": s.dev_login, "signup": s.signup_mode}
 
 
 @core.get("/catalog/providers")
@@ -127,6 +127,8 @@ async def lifespan(application: FastAPI):
 
 def create_app(settings: config.Settings | None = None) -> FastAPI:
     settings = settings or config.load()
+    if settings.dev_login and not settings.is_local:
+        raise RuntimeError("AI_FACTORY_DEV_LOGIN lets anyone sign in as any email; it is refused when AI_FACTORY_PUBLIC_URL is not localhost")
     application = FastAPI(title="AI Factory Core", version="0.2.0", lifespan=lifespan)
     application.state.settings = settings
     application.add_middleware(
@@ -139,6 +141,7 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
     application.include_router(core)
     application.include_router(auth.router)
     application.include_router(connections.router)
+    application.include_router(account.router)
     application.include_router(factory_api.router)
     console = settings.catalog_dir.parent
     if os.environ.get("AI_FACTORY_SERVE_CONSOLE", "true").lower() in ("1", "true", "yes") and (console / "index.html").exists():

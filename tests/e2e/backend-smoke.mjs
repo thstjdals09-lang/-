@@ -49,7 +49,7 @@ try {
   page.on("pageerror", (e) => failures.push("pageerror: " + e.message));
   page.on("dialog", (d) => (d.type() === "prompt" ? d.accept("ceo@localhost") : d.accept()));
   await page.goto(origin + "/console/");
-  await page.getByRole("button", { name: /Google로 계속하기/ }).click();
+  await page.getByRole("button", { name: /Google 계정으로 로그인/ }).click();
   await page.waitForSelector(".sidebarFoot >> text=Backend 연결");
 
   await page.locator("#topicForm input[name=topic]").fill("좀비");
@@ -78,10 +78,15 @@ try {
   await page.getByRole("button", { name: "승인" }).first().click();
   await page.waitForTimeout(500);
 
+  await page.locator(".accountChip").click();
+  await page.waitForSelector("text=내 사용 현황");
+  check(await page.getByText("ceo@localhost").first().isVisible(), "account page shows the signed-in email");
+  check(await page.getByText("미연결").first().isVisible(), "personal GitHub starts disconnected");
+  if (shots) await page.screenshot({ path: join(shots, "backend-account.png"), fullPage: true });
   await page.locator(".nav").getByRole("button", { name: "로그" }).click();
   check((await page.locator(".logList li").count()) > 10, "server logs should be listed");
   await page.getByRole("button", { name: "로그아웃" }).click();
-  await page.waitForSelector("text=CEO 로그인");
+  await page.waitForSelector("text=Google 계정으로 로그인");
 } catch (err) {
   failures.push("step failed: " + err.message.split("\n").slice(0, 3).join(" | "));
   try {
