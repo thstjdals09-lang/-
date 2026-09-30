@@ -1,0 +1,172 @@
+{
+  "schema_version": 1,
+  "routing": {
+    "default_policy": "cheapest_viable_quality",
+    "required_quality": {"1": 55, "2": 72, "3": 85},
+    "estimated_tokens": {"1": 2500, "2": 6000, "3": 12000},
+    "scarce_request_limit": 500
+  },
+  "roles": [
+    "Producer", "Creative Director", "Game Director", "Game Designer", "Systems Designer",
+    "Technical Director", "Gameplay Programmer", "Systems Programmer", "UI/UX", "Art Director",
+    "QA", "Build Engineer", "Release Manager", "Live Ops"
+  ],
+  "idea_criteria": [
+    {"id": "fun", "label": "재미 가능성", "weight": 0.18},
+    {"id": "coreLoop", "label": "core loop 명확성", "weight": 0.14},
+    {"id": "cost", "label": "제작 비용", "weight": 0.12},
+    {"id": "schedule", "label": "제작 기간", "weight": 0.08},
+    {"id": "novelty", "label": "차별성", "weight": 0.13},
+    {"id": "feasibility", "label": "기술 난이도", "weight": 0.10},
+    {"id": "market", "label": "시장성", "weight": 0.11},
+    {"id": "scalability", "label": "확장성", "weight": 0.07},
+    {"id": "risk", "label": "리스크", "weight": 0.07}
+  ],
+  "idea_reviewers": [
+    {"role": "Creative Director", "focus": ["fun", "novelty"]},
+    {"role": "Producer", "focus": ["cost", "schedule", "risk"]},
+    {"role": "Technical Director", "focus": ["feasibility", "scalability"]},
+    {"role": "Game Designer", "focus": ["coreLoop", "market"]}
+  ],
+  "idea_patterns": [
+    {"type": "Roguelike Core", "family": "action", "pitch": "매 판 다른 조합과 위험/보상으로 반복 플레이를 만든다.", "loop": ["선택", "전투/판정", "보상", "성장", "보스"], "bias": {"fun": 8, "scalability": 6, "cost": -4}},
+    {"type": "Deckbuilder", "family": "strategy", "pitch": "규칙을 카드와 능력 조합으로 표현해 빌드 연구가 핵심이 된다.", "loop": ["획득", "덱 구성", "판정", "시너지", "강화"], "bias": {"coreLoop": 7, "novelty": 3, "feasibility": 4}},
+    {"type": "Tycoon", "family": "management", "pitch": "운영·배치·자동화의 최적화를 즐긴다.", "loop": ["배치", "운영", "수익", "확장", "자동화"], "bias": {"market": 6, "scalability": 7, "cost": 2}},
+    {"type": "Tactical", "family": "strategy", "pitch": "제한된 정보에서 읽기·예측·리스크 관리로 승부한다.", "loop": ["정보", "선택", "상대 반응", "결과", "적응"], "bias": {"coreLoop": 5, "novelty": 5, "schedule": -3}},
+    {"type": "Survivor", "family": "action", "pitch": "짧은 조작과 빠른 성장으로 대량의 적을 버틴다.", "loop": ["이동", "처치", "경험치", "업그레이드", "웨이브"], "bias": {"fun": 9, "market": 7, "novelty": -6}},
+    {"type": "Puzzle Strategy", "family": "strategy", "pitch": "간단한 규칙 조합으로 깊은 의사결정을 만든다.", "loop": ["관찰", "배치", "연쇄", "해결", "난이도 상승"], "bias": {"cost": 8, "schedule": 7, "market": -4}},
+    {"type": "Social Party", "family": "strategy", "pitch": "짧은 라운드와 심리전으로 반복 플레이한다.", "loop": ["규칙", "선택/블러프", "공개", "점수", "다음 라운드"], "bias": {"fun": 4, "feasibility": -8, "risk": -6}},
+    {"type": "Management RPG", "family": "management", "pitch": "캐릭터 육성과 운영을 결합한다.", "loop": ["영입", "훈련", "배치", "임무", "성장"], "bias": {"scalability": 8, "cost": -7, "schedule": -6}},
+    {"type": "Extraction Lite", "family": "action", "pitch": "더 가져갈지 탈출할지를 계속 결정한다.", "loop": ["진입", "탐색", "위험 상승", "전리품", "탈출"], "bias": {"novelty": 7, "fun": 5, "risk": -4}},
+    {"type": "Arcade Score", "family": "action", "pitch": "한 가지 핵심 조작과 점수 경쟁에 집중한다.", "loop": ["조작", "콤보", "위험 증가", "기록", "재도전"], "bias": {"cost": 9, "schedule": 9, "scalability": -8}}
+  ],
+  "stages": [
+    {
+      "id": "brief", "name": "Brief / Theme Intake", "summary": "주제·플랫폼·제약조건 정리", "scope": "portfolio",
+      "tasks": [
+        {"id": "brief", "name": "프로젝트 브리프 작성", "role": "Producer", "kind": "planning", "difficulty": 1, "depends": [], "artifact": "project-brief.md"}
+      ]
+    },
+    {
+      "id": "ideation", "name": "Ideation Room", "summary": "10개 아이디어 생성·비평·자동 선별", "scope": "portfolio",
+      "tasks": [
+        {"id": "generate", "name": "아이디어 10개 생성", "role": "Creative Director", "kind": "planning", "difficulty": 2, "depends": [], "artifact": "ideas.json"},
+        {"id": "critique", "name": "다중 AI 비평", "role": "Game Designer", "kind": "planning", "difficulty": 2, "depends": ["generate"], "artifact": "idea-critique.md"},
+        {"id": "shortlist", "name": "점수화·자동 shortlist", "role": "Producer", "kind": "planning", "difficulty": 2, "critical": true, "depends": ["critique"], "artifact": "shortlist.json"}
+      ]
+    },
+    {
+      "id": "greenlight", "name": "Greenlight / Feasibility", "summary": "재미·범위·기술 리스크 검증",
+      "tasks": [
+        {"id": "loop", "name": "핵심 루프 검증", "role": "Game Director", "kind": "planning", "difficulty": 2, "depends": [], "artifact": "core-loop.md"},
+        {"id": "scope", "name": "범위·비용 추정", "role": "Producer", "kind": "planning", "difficulty": 1, "depends": [], "artifact": "scope-estimate.md"},
+        {"id": "tech", "name": "기술 타당성 검토", "role": "Technical Director", "kind": "planning", "difficulty": 2, "depends": [], "artifact": "tech-feasibility.md"},
+        {"id": "risk", "name": "리스크 레지스터", "role": "QA", "kind": "qa", "difficulty": 1, "depends": ["loop", "tech"], "artifact": "risk-register.json"},
+        {"id": "gate", "name": "GO / REVISE / STOP 판정", "role": "Producer", "kind": "planning", "difficulty": 3, "critical": true, "depends": ["loop", "scope", "tech", "risk"], "artifact": "greenlight-report.md"}
+      ]
+    },
+    {
+      "id": "preproduction", "name": "Pre-Production", "summary": "GDD·아키텍처·UX·아트 방향 확정",
+      "tasks": [
+        {"id": "gdd", "name": "GDD 작성", "role": "Game Designer", "kind": "planning", "difficulty": 2, "depends": [], "artifact": "GDD.md"},
+        {"id": "economy", "name": "진행·경제 설계", "role": "Systems Designer", "kind": "planning", "difficulty": 2, "depends": ["gdd"], "artifact": "economy.md"},
+        {"id": "arch", "name": "기술 아키텍처", "role": "Technical Director", "kind": "planning", "difficulty": 3, "critical": true, "depends": ["gdd"], "artifact": "architecture.md"},
+        {"id": "ux", "name": "UX 흐름", "role": "UI/UX", "kind": "design", "difficulty": 1, "depends": ["gdd"], "artifact": "ux-flow.md"},
+        {"id": "art", "name": "아트 바이블", "role": "Art Director", "kind": "design", "difficulty": 1, "depends": ["gdd"], "artifact": "art-bible.md"},
+        {"id": "backlog", "name": "제작 백로그", "role": "Producer", "kind": "planning", "difficulty": 1, "depends": ["economy", "arch", "ux", "art"], "artifact": "production-backlog.json"}
+      ]
+    },
+    {
+      "id": "prototype", "name": "Playable Prototype", "summary": "핵심 재미를 증명하는 최소 플레이 버전", "build": "0.1.0",
+      "tasks": [
+        {"id": "scaffold", "name": "저장소·빌드 골격", "role": "Build Engineer", "kind": "coding", "difficulty": 1, "depends": [], "artifact": "src/"},
+        {"id": "core", "name": "핵심 루프 구현", "role": "Gameplay Programmer", "kind": "coding", "difficulty": 2, "depends": ["scaffold"], "artifact": "src/game.js"},
+        {"id": "state", "name": "입력·상태 머신", "role": "Systems Programmer", "kind": "coding", "difficulty": 2, "depends": ["scaffold"], "artifact": "src/state.js"},
+        {"id": "hud", "name": "임시 UI/HUD", "role": "UI/UX", "kind": "coding", "difficulty": 1, "depends": ["core"], "artifact": "src/hud.js"},
+        {"id": "playtest", "name": "프로토타입 플레이테스트", "role": "QA", "kind": "qa", "difficulty": 1, "depends": ["core", "state", "hud"], "artifact": "prototype-findings.md"},
+        {"id": "fun", "name": "재미 검증 리뷰", "role": "Game Director", "kind": "planning", "difficulty": 2, "critical": true, "depends": ["playtest"], "artifact": "fun-review.md"}
+      ]
+    },
+    {
+      "id": "vertical", "name": "Vertical Slice", "summary": "최종 품질에 가까운 대표 구간 제작", "build": "0.5.0",
+      "tasks": [
+        {"id": "feature", "name": "대표 구간 기능 완성", "role": "Gameplay Programmer", "kind": "coding", "difficulty": 2, "depends": [], "artifact": "src/slice.js"},
+        {"id": "artpass", "name": "최종 품질 아트 패스", "role": "Art Director", "kind": "design", "difficulty": 2, "depends": [], "artifact": "assets/slice/"},
+        {"id": "ui", "name": "UI 폴리시", "role": "UI/UX", "kind": "design", "difficulty": 2, "depends": ["feature"], "artifact": "src/ui.css"},
+        {"id": "build", "name": "슬라이스 통합 빌드", "role": "Build Engineer", "kind": "coding", "difficulty": 1, "depends": ["feature", "artpass", "ui"], "artifact": "vertical-slice.zip"},
+        {"id": "visualqa", "name": "비전 기반 화면 QA", "role": "QA", "kind": "vision", "difficulty": 2, "depends": ["build"], "artifact": "visual-review.md"},
+        {"id": "bar", "name": "품질 기준선 승인", "role": "Creative Director", "kind": "planning", "difficulty": 3, "critical": true, "depends": ["visualqa"], "artifact": "quality-bar.md"}
+      ]
+    },
+    {
+      "id": "production", "name": "Full Production", "summary": "기능·콘텐츠·도구·저장·UI 본개발",
+      "tasks": [
+        {"id": "content", "name": "콘텐츠 제작", "role": "Game Designer", "kind": "planning", "difficulty": 1, "depends": [], "artifact": "content.json"},
+        {"id": "systems", "name": "진행 시스템 구현", "role": "Systems Programmer", "kind": "coding", "difficulty": 2, "depends": [], "artifact": "src/progression.js"},
+        {"id": "save", "name": "저장/불러오기", "role": "Systems Programmer", "kind": "coding", "difficulty": 2, "depends": ["systems"], "artifact": "src/save.js"},
+        {"id": "screens", "name": "메뉴·설정 화면", "role": "UI/UX", "kind": "coding", "difficulty": 1, "depends": [], "artifact": "src/screens.js"},
+        {"id": "assets", "name": "아트 에셋 제작", "role": "Art Director", "kind": "design", "difficulty": 1, "depends": [], "artifact": "assets/"},
+        {"id": "integrate", "name": "통합 빌드", "role": "Build Engineer", "kind": "coding", "difficulty": 1, "depends": ["content", "save", "screens", "assets"], "artifact": "production-build.zip"},
+        {"id": "codereview", "name": "코드 리뷰", "role": "Technical Director", "kind": "debugging", "difficulty": 3, "critical": true, "depends": ["integrate"], "artifact": "code-review.md"}
+      ]
+    },
+    {
+      "id": "qa", "name": "Internal QA / Integration", "summary": "통합·회귀·성능·호환성 검증",
+      "tasks": [
+        {"id": "functional", "name": "기능 테스트", "role": "QA", "kind": "qa", "difficulty": 1, "depends": [], "artifact": "qa-report.md"},
+        {"id": "regression", "name": "회귀 테스트", "role": "QA", "kind": "qa", "difficulty": 1, "depends": [], "artifact": "regression-report.json"},
+        {"id": "perf", "name": "성능 프로파일링", "role": "Technical Director", "kind": "debugging", "difficulty": 2, "depends": [], "artifact": "perf-report.md"},
+        {"id": "fix", "name": "버그 수정", "role": "Gameplay Programmer", "kind": "debugging", "difficulty": 2, "depends": ["functional", "regression", "perf"], "artifact": "fixes.patch"},
+        {"id": "ci", "name": "통합 CI 빌드", "role": "Build Engineer", "kind": "coding", "difficulty": 1, "depends": ["fix"], "artifact": "ci-build.log"}
+      ]
+    },
+    {
+      "id": "alpha", "name": "Alpha", "summary": "기능 완성도 확보·안정화", "build": "0.8.0",
+      "tasks": [
+        {"id": "checklist", "name": "기능 완성 체크리스트", "role": "Producer", "kind": "planning", "difficulty": 1, "depends": [], "artifact": "feature-complete.md"},
+        {"id": "stabilize", "name": "안정화 수정", "role": "Gameplay Programmer", "kind": "debugging", "difficulty": 2, "depends": ["checklist"], "artifact": "stabilization.patch"},
+        {"id": "build", "name": "Alpha 빌드", "role": "Build Engineer", "kind": "coding", "difficulty": 1, "depends": ["stabilize"], "artifact": "alpha-build.zip"},
+        {"id": "pass", "name": "Alpha QA 패스", "role": "QA", "kind": "qa", "difficulty": 1, "depends": ["build"], "artifact": "alpha-qa.md"}
+      ]
+    },
+    {
+      "id": "beta", "name": "Beta", "summary": "콘텐츠 완성·밸런스·출시후보 준비", "build": "0.9.0",
+      "tasks": [
+        {"id": "balance", "name": "밸런스 튜닝", "role": "Systems Designer", "kind": "planning", "difficulty": 2, "depends": [], "artifact": "balance-report.md"},
+        {"id": "content", "name": "콘텐츠 완성", "role": "Game Designer", "kind": "planning", "difficulty": 1, "depends": [], "artifact": "content-final.json"},
+        {"id": "compat", "name": "호환성·성능 검증", "role": "QA", "kind": "qa", "difficulty": 1, "depends": ["balance", "content"], "artifact": "compat-report.md"},
+        {"id": "build", "name": "Beta 빌드", "role": "Build Engineer", "kind": "coding", "difficulty": 1, "depends": ["compat"], "artifact": "beta-build.zip"},
+        {"id": "rc", "name": "출시후보 리뷰", "role": "Game Director", "kind": "planning", "difficulty": 3, "critical": true, "depends": ["build"], "artifact": "rc-review.md"}
+      ]
+    },
+    {
+      "id": "polish", "name": "Polish / Certification", "summary": "UX·접근성·현지화·스토어 요건 마감",
+      "tasks": [
+        {"id": "ux", "name": "UX 폴리시", "role": "UI/UX", "kind": "design", "difficulty": 1, "depends": [], "artifact": "ux-polish.md"},
+        {"id": "a11y", "name": "접근성 점검", "role": "UI/UX", "kind": "qa", "difficulty": 1, "depends": [], "artifact": "accessibility.md"},
+        {"id": "l10n", "name": "현지화 문자열", "role": "Game Designer", "kind": "planning", "difficulty": 1, "depends": [], "artifact": "strings.json"},
+        {"id": "store", "name": "스토어·플랫폼 요건", "role": "Release Manager", "kind": "planning", "difficulty": 1, "depends": [], "artifact": "store-checklist.md"},
+        {"id": "cert", "name": "인증 QA", "role": "QA", "kind": "qa", "difficulty": 2, "depends": ["ux", "a11y", "l10n", "store"], "artifact": "cert-report.md"}
+      ]
+    },
+    {
+      "id": "release", "name": "Release Build", "summary": "배포파일·버전 태그·릴리즈노트 생성", "build": "1.0.0", "ceo_gate": true,
+      "tasks": [
+        {"id": "notes", "name": "버전 태그·릴리즈노트", "role": "Release Manager", "kind": "planning", "difficulty": 1, "depends": [], "artifact": "release-notes.md"},
+        {"id": "web", "name": "Web 릴리즈 빌드", "role": "Build Engineer", "kind": "coding", "difficulty": 1, "depends": [], "artifact": "release/index.html"},
+        {"id": "windows", "name": "Windows 패키지", "role": "Build Engineer", "kind": "coding", "difficulty": 2, "depends": ["web"], "artifact": "release/windows.zip"},
+        {"id": "smoke", "name": "최종 smoke test", "role": "QA", "kind": "qa", "difficulty": 1, "depends": ["web", "windows"], "artifact": "smoke.json"},
+        {"id": "package", "name": "CEO 검토 패키지", "role": "Producer", "kind": "planning", "difficulty": 1, "depends": ["notes", "smoke"], "artifact": "ceo-review.md"}
+      ]
+    },
+    {
+      "id": "live", "name": "Live Operations", "summary": "피드백·크래시·패치·업데이트 운영",
+      "tasks": [
+        {"id": "monitor", "name": "크래시·피드백 모니터링", "role": "Live Ops", "kind": "qa", "difficulty": 1, "depends": [], "artifact": "live-monitor.md"},
+        {"id": "patch", "name": "패치 계획", "role": "Live Ops", "kind": "planning", "difficulty": 1, "depends": ["monitor"], "artifact": "patch-plan.md"},
+        {"id": "update", "name": "콘텐츠 업데이트 계획", "role": "Game Designer", "kind": "planning", "difficulty": 1, "depends": ["monitor"], "artifact": "update-roadmap.md"},
+        {"id": "experiment", "name": "실험 설계", "role": "Live Ops", "kind": "planning", "difficulty": 1, "depends": ["patch"], "artifact": "experiments.md"}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "ai-factory",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"tests/web/*.test.mjs\"",
+    "check": "node scripts/check-web.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0"
+  }
+}
