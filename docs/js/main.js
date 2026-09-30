@@ -133,7 +133,7 @@ function renderView() {
     team: ai.team, market: ai.market,
     review: ops.review, results: ops.results, logs: ops.logs, settings: ops.settings,
   }[tab[0]];
-  view.innerHTML = fn(app);
+  view.innerHTML = (app.ui.flash ? '<p class="notice flash">' + esc(app.ui.flash) + "</p>" : "") + fn(app);
   mountThumbs(view);
   renderNav();
 }
@@ -211,7 +211,7 @@ function commit(opts = {}) {
 }
 
 const actions = {
-  tab(id) { app.ui.tab = id; app.ui.editingTopic = false; commit(); window.scrollTo(0, 0); },
+  tab(id) { app.ui.tab = id; app.ui.editingTopic = false; app.ui.flash = null; commit(); window.scrollTo(0, 0); },
   "new-topic"() { app.ui.editingTopic = true; commit(); },
   "cancel-topic"() { app.ui.editingTopic = false; commit(); },
   "open-line"(id) { app.ui.tab = "lines"; app.ui.lineId = id; app.ui.stageId = null; commit(); window.scrollTo(0, 0); },
@@ -249,7 +249,14 @@ const actions = {
   "close-modal"() { closeModal(); },
   approve(id) { approveReview(app.state, id, app.ctx); commit(); },
   "market-filter"(id) { app.ui.marketFilter = id; commit(); },
-  connect(id) { app.ui.connectId = id; app.ui.connectAuth = null; openModal(ai.connectModal(app, id)); },
+  connect(id) { app.ui.connectId = id; app.ui.connectAuth = null; app.ui.connectResult = null; openModal(ai.connectModal(app, id)); },
+  "connect-done"() {
+    const ok = app.ui.connectResult && app.ui.connectResult.ok;
+    closeModal();
+    app.ui.connectResult = null;
+    if (ok) app.ui.tab = "team";
+    commit();
+  },
   "connect-auth"(auth) { app.ui.connectAuth = auth; openModal(ai.connectModal(app, app.ui.connectId)); },
   "emp-pause"(id) { empById(id).status = "paused"; addLog(app.state, app.ctx, "HR", empById(id).name + " 신규 배정 중지"); commit(); },
   "emp-resume"(id) { empById(id).status = "online"; addLog(app.state, app.ctx, "HR", empById(id).name + " 배정 재개"); commit(); },
@@ -281,13 +288,6 @@ const actions = {
   "preview-login"() {
     app.state.user = { signedIn: true, mode: "preview", email: "preview@local", name: "CEO (Preview)" };
     addLog(app.state, app.ctx, "AUTH", "프리뷰 세션 시작 · 서버·자격증명 없이 브라우저 시뮬레이션");
-    // Seed the recommended free AIs as simulated employees so routing and failover are visible.
-    if (app.state.employees.length <= 1) {
-      for (const p of app.ctx.providers.filter((x) => x.recommended && x.auth_types[0] !== "local")) {
-        if (!app.state.employees.some((e) => e.catalogId === p.id)) app.state.employees.push(employeeFromCatalog(p, app.ctx));
-      }
-      addLog(app.state, app.ctx, "HIRE", "추천 무료 AI 스타터 팀을 시뮬레이션 사원으로 배치");
-    }
     commit({ full: true });
   },
   async "google-login"() {
@@ -467,18 +467,23 @@ const forms = {
       if (auth === "oauth") {
         status.textContent = "OAuth 시작 중…";
         const res = await api.oauthStart(p.id, location.origin + location.pathname);
-        location.href = res.authorize_url;
+        location.href = res.authorize_url; // provider login → key issued → server vault → back here
         return;
       }
       if (!apiKey && auth === "api_key") { status.textContent = "API Key를 입력하세요."; return; }
       status.textContent = "Vault 저장 · health_check · quota_probe 중…";
       const res = await api.connectProvider({ catalog_id: p.id, auth_type: auth, api_key: apiKey || null, endpoint: endpoint || null });
       await sync();
-      closeModal();
+      app.ui.connectResult = res.status === "online"
+        ? { providerId: p.id, ok: true, models: res.models, quotaLimit: res.quota_limit, quotaUsed: res.quota_used, quotaUnit: res.quota_unit,
+            credentialRef: res.credential_ref, fingerprint: res.credential_fingerprint }
+        : { providerId: p.id, ok: false, message: (res.status === "auth_required" ? "키가 거부되었습니다. 키를 다시 확인하세요. " : "서버가 AI에 접속하지 못했습니다. ") + (res.last_error || "") };
+      if (res.status !== "online") await api.deleteConnection(res.id).catch(() => {});
+      openModal(ai.connectModal(app, p.id));
       commit();
-      if (res.status !== "online") alert(p.name + " 연결 상태: " + res.status + (res.last_error ? " · " + res.last_error : ""));
     } catch (err) {
-      status.textContent = err.status === 501 ? "이 provider의 OAuth adapter는 아직 준비 중입니다. API key 방식을 사용하세요." : "연결 실패: " + (err.detail || err.message);
+      const reasons = { 409: "이미 연결된 AI입니다.", 501: "이 AI의 로그인 연결은 준비 중입니다. API 키 방식을 사용하세요.", 503: "서버 Vault가 설정되지 않았습니다 (AI_FACTORY_VAULT_KEY)." };
+      status.textContent = reasons[err.status] || "연결 실패: " + (err.detail || err.message);
     }
   },
 };
@@ -523,6 +528,11 @@ function bindEvents() {
     }
   });
   document.addEventListener("input", (ev) => {
+    if (ev.target.name === "api_key" && ev.target.dataset.prefix) {
+      const hint = document.querySelector("[data-key-hint]");
+      const v = ev.target.value.trim();
+      if (hint) hint.textContent = v && !v.startsWith(ev.target.dataset.prefix) ? "보통 " + ev.target.dataset.prefix + "… 로 시작합니다. 다른 키를 붙여넣지 않았는지 확인하세요." : "";
+    }
     if (ev.target.dataset.change === "log-query") {
       app.ui.logQuery = ev.target.value;
       clearTimeout(bindEvents.t);
@@ -567,7 +577,15 @@ async function restoreBackendSession() {
       /* not signed in to the backend: stay in preview */
     }
   }
-  if (/[?&]login=/.test(location.search)) history.replaceState(null, "", location.pathname);
+  const params = new URLSearchParams(location.search);
+  if (params.get("connected")) {
+    app.ui.tab = "team";
+    app.ui.flash = params.get("connected") + " 로그인 연결 완료 · 상태 " + (params.get("status") || "?");
+  } else if (params.get("connect_error")) {
+    app.ui.tab = "market";
+    app.ui.flash = "AI 로그인 연결 실패: " + params.get("connect_error");
+  }
+  if (/[?&](login|connected|connect_error)=/.test(location.search)) history.replaceState(null, "", location.pathname);
 }
 
 async function boot() {

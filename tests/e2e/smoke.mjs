@@ -69,10 +69,12 @@ async function run(viewport, label) {
   await page.getByRole("tab", { name: /^무료/ }).click();
   await page.locator('[data-action="connect"][data-id="mistral"]').click();
   check(await page.locator('input[name="api_key"]').isDisabled(), label + ": API key input must be disabled in preview mode");
-  await page.getByRole("button", { name: "시뮬레이션으로 설치" }).click();
+  await page.getByRole("button", { name: "가짜(시뮬레이션)로 추가" }).click();
 
   await page.locator(".nav").getByRole("button", { name: /AI 사원/ }).click();
   check((await page.locator(".employee").count()) >= 2, label + ": hired employee should appear");
+  check(await page.getByText("실제 연결 AI 0명").isVisible(), label + ": preview must report zero real AIs");
+  check((await page.locator(".employee .pill.fake").count()) === (await page.locator(".employee").count()), label + ": every preview employee is marked fake");
   await page.locator('[data-action="emp-drain"][data-id="mistral"]').click();
   if (shots) await page.screenshot({ path: join(shots, label + "-team.png"), fullPage: true });
 

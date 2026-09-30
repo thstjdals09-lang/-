@@ -1,3 +1,4 @@
+import json
 import httpx
 import pytest
 
@@ -115,10 +116,45 @@ def test_connection_with_rejected_key_needs_reauth(signed_in, http):
 def test_connection_guards(signed_in, client, monkeypatch):
     assert signed_in.post("/providers/connections", json={"catalog_id": "groq", "auth_type": "api_key"}, headers=CSRF).status_code == 400
     assert signed_in.post("/providers/connections", json={"catalog_id": "nope", "auth_type": "api_key", "api_key": "x"}, headers=CSRF).status_code == 404
-    assert signed_in.get("/providers/oauth/openrouter/start").status_code == 501
+    assert signed_in.get("/providers/oauth/groq/start").status_code == 404  # groq has no login flow, only keys
     monkeypatch.delenv("AI_FACTORY_VAULT_KEY")
     assert signed_in.post("/providers/connections", json={"catalog_id": "groq", "auth_type": "api_key", "api_key": "x"}, headers=CSRF).status_code == 503
 
 
 def test_connections_require_login(client):
     assert client.get("/providers/connections").status_code == 401
+
+
+def test_openrouter_login_issues_key_into_vault(signed_in, http):
+    start = signed_in.get("/providers/oauth/openrouter/start", params={"return_to": "http://127.0.0.1:8000/console/"})
+    assert start.status_code == 200
+    url = httpx.URL(start.json()["authorize_url"])
+    assert url.host == "openrouter.ai" and url.params["code_challenge_method"] == "S256"
+    callback = httpx.URL(url.params["callback_url"])
+    issued = "sk-or-v1-issuedkey1234567890"
+
+    def exchange(req):
+        body = json.loads(req.content)
+        assert body["code"] == "code-123" and body["code_verifier"] and body["code_challenge_method"] == "S256"
+        return httpx.Response(200, json={"key": issued})
+
+    http.add("POST", "openrouter.ai/api/v1/auth/keys", exchange)
+    http.add("GET", "openrouter.ai/api/v1/models", lambda r: httpx.Response(200, json={"data": [{"id": "openrouter/free"}]}))
+    http.add("GET", "openrouter.ai/api/v1/key", lambda r: httpx.Response(200, json={"data": {"limit": None}}))
+    back = signed_in.get(callback.path, params={"code": "code-123"}, follow_redirects=False)
+    assert back.status_code == 302 and "connected=openrouter" in back.headers["location"] and "status=online" in back.headers["location"]
+    conns = signed_in.get("/providers/connections").json()
+    assert conns[0]["catalog_id"] == "openrouter" and conns[0]["auth_type"] == "oauth" and conns[0]["credential_ref"].startswith("vault://")
+    assert issued not in json.dumps(conns)
+    # state is single use and bound to the user who started the login
+    assert signed_in.get(callback.path, params={"code": "code-123"}, follow_redirects=False).status_code == 400
+
+
+def test_openrouter_login_rejects_another_session(signed_in, http):
+    start = signed_in.get("/providers/oauth/openrouter/start").json()
+    callback = httpx.URL(httpx.URL(start["authorize_url"]).params["callback_url"])
+    signed_in.post("/auth/logout", headers=CSRF)
+    signed_in.post("/auth/dev-login", json={"email": "intruder@example.com"}, headers=CSRF)
+    back = signed_in.get(callback.path, params={"code": "x"}, follow_redirects=False)
+    assert "connect_error=session_mismatch" in back.headers["location"]
+    assert signed_in.get("/providers/connections").json() == []

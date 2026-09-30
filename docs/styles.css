@@ -333,3 +333,8 @@ label.reserve { grid-template-columns: auto 1fr; align-items: center; }
 .deploy .url { overflow-wrap: anywhere; color: #9ee8bb; }
 .concept { display: grid; gap: 4px; }
 .concept .chips { margin: 0; }
+
+.pill.fake { font-size: 12px; padding: 4px 10px; }
+.guide { margin: 0; padding-left: 20px; display: grid; gap: 4px; color: var(--soft); font-size: 13px; }
+.steps li.bad { border-color: #5a2a2e; color: var(--bad); }
+.flash { margin-bottom: 14px; }

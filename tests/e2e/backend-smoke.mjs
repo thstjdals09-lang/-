@@ -60,7 +60,8 @@ try {
   if (shots) await page.screenshot({ path: join(shots, "backend-dashboard.png"), fullPage: true });
 
   await page.locator(".nav").getByRole("button", { name: /AI 사원/ }).click();
-  check(await page.getByText("Simulated Local Worker").isVisible(), "simulated worker should be shown when nothing is connected");
+  check(await page.getByText("실제 연결 AI 0명").isVisible(), "team view must say no real AI is connected");
+  check((await page.locator(".pill.fake").count()) >= 1, "the placeholder worker must carry the fake badge");
 
   await page.locator(".nav").getByRole("button", { name: /생산라인/ }).click();
   await page.getByRole("button", { name: "다음 게이트까지 즉시 실행" }).click();

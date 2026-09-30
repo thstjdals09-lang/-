@@ -51,6 +51,14 @@ task, the router tries a modality fallback, and a local or simulated worker keep
 commit → reviewer (coding tasks) → merge `--no-ff` into `main` → worktree and branch removed. `main`
 always holds a playable `game/index.html`.
 
+## Quick start on Windows
+
+Double-click **`start-backend.cmd`** in the repository root. On first run it creates the Python environment and
+`backend/.env` (fresh vault key, local-only login), starts the server on 127.0.0.1 and opens
+http://127.0.0.1:8000/console/. Then open **AI 마켓 → + AI 추가**: each provider card opens its login / key
+page, you paste the key, and the server stores it in the vault and verifies it (model list, quota).
+OpenRouter supports **로그인으로 연결**: approve on openrouter.ai and the key is issued straight into the vault.
+
 ## Run the backend locally
 
 ```bash

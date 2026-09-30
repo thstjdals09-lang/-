@@ -7,12 +7,15 @@ import json
 import secrets
 import sqlite3
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlencode
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from . import catalog, db, vault
-from .auth import User, csrf_guard, current_user
+from .auth import User, csrf_guard, current_user, pkce_pair, safe_return_to
 from .providers import AdapterUnavailable, ProviderAdapter, ProviderError, build_adapter
 
 router = APIRouter(prefix="/providers", tags=["providers"], dependencies=[Depends(csrf_guard)])
@@ -122,6 +125,29 @@ def list_connections(user: User = Depends(current_user)) -> list[ConnectionOut]:
         return [row_to_out(conn, r) for r in rows]
 
 
+def install_connection(conn, user_id: str, entry: dict, *, auth_type: str, secret: str | None, endpoint: str | None = None,
+                       model: str | None = None, reserve: float | None = None, transport=None) -> sqlite3.Row:
+    """Stores the credential in the vault, creates the connection and verifies it
+    (health_check → list_models → quota_probe). Shared by API-key and OAuth installs."""
+    if conn.execute("SELECT 1 FROM provider_connections WHERE user_id=? AND catalog_id=?", (user_id, entry["id"])).fetchone():
+        raise HTTPException(status_code=409, detail="already_installed")
+    credential_id = vault.store(conn, user_id, secret) if secret else None
+    connection_id = "con_" + secrets.token_urlsafe(10)
+    quota = entry["quota"]
+    conn.execute(
+        """INSERT INTO provider_connections(id, user_id, catalog_id, auth_type, credential_id, endpoint, model, status,
+           reserve, quota_limit, quota_unit, quota_window, quota_reset_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            connection_id, user_id, entry["id"], auth_type, credential_id, endpoint, model or entry.get("default_model"), "pending",
+            reserve if reserve is not None else quota.get("default_reserve", 0),
+            quota.get("limit"), quota.get("unit"), quota.get("window"), _iso(next_reset(quota.get("window"), _now())),
+        ),
+    )
+    row = conn.execute("SELECT * FROM provider_connections WHERE id=?", (connection_id,)).fetchone()
+    verify(conn, user_id, row, entry, transport)
+    return conn.execute("SELECT * FROM provider_connections WHERE id=?", (connection_id,)).fetchone()
+
+
 @router.post("/connections", response_model=ConnectionOut, status_code=201)
 def create_connection(payload: ConnectionCreate, request: Request, user: User = Depends(current_user)) -> ConnectionOut:
     settings = request.app.state.settings
@@ -136,27 +162,10 @@ def create_connection(payload: ConnectionCreate, request: Request, user: User = 
         raise HTTPException(status_code=400, detail="api_key_required")
     if payload.api_key and not vault.configured():
         raise HTTPException(status_code=503, detail="vault_not_configured")
-
-    now = _now()
     with db.transaction() as conn:
-        if conn.execute("SELECT 1 FROM provider_connections WHERE user_id=? AND catalog_id=?", (user.id, payload.catalog_id)).fetchone():
-            raise HTTPException(status_code=409, detail="already_installed")
-        credential_id = vault.store(conn, user.id, payload.api_key) if payload.api_key else None
-        connection_id = "con_" + secrets.token_urlsafe(10)
-        quota = entry["quota"]
-        conn.execute(
-            """INSERT INTO provider_connections(id, user_id, catalog_id, auth_type, credential_id, endpoint, model, status,
-               reserve, quota_limit, quota_unit, quota_window, quota_reset_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                connection_id, user.id, entry["id"], payload.auth_type, credential_id, payload.endpoint,
-                payload.model or entry.get("default_model"), "pending",
-                payload.reserve if payload.reserve is not None else quota.get("default_reserve", 0),
-                quota.get("limit"), quota.get("unit"), quota.get("window"), _iso(next_reset(quota.get("window"), now)),
-            ),
-        )
-        row = conn.execute("SELECT * FROM provider_connections WHERE id=?", (connection_id,)).fetchone()
-        verify(conn, user.id, row, entry, getattr(request.app.state, "http_transport", None))
-        row = conn.execute("SELECT * FROM provider_connections WHERE id=?", (connection_id,)).fetchone()
+        row = install_connection(conn, user.id, entry, auth_type=payload.auth_type, secret=(payload.api_key or "").strip() or None,
+                                 endpoint=payload.endpoint, model=payload.model, reserve=payload.reserve,
+                                 transport=getattr(request.app.state, "http_transport", None))
         return row_to_out(conn, row)
 
 
@@ -182,10 +191,70 @@ def delete_connection(connection_id: str, user: User = Depends(current_user)) ->
             vault.delete(conn, user.id, row["credential_id"])
 
 
+# ---- provider OAuth (login → key issued automatically → vault) ----
+
+OAUTH_STATE_TTL = 600
+OPENROUTER_AUTH = "https://openrouter.ai/auth"
+OPENROUTER_KEYS = "https://openrouter.ai/api/v1/auth/keys"
+
+
+def _append_query(url: str, **params) -> str:
+    return url + ("&" if "?" in url else "?") + urlencode(params)
+
+
 @router.get("/oauth/{provider_id}/start")
-def oauth_start(provider_id: str, request: Request, user: User = Depends(current_user)) -> dict:
-    entry = catalog.provider(request.app.state.settings.catalog_dir, provider_id)
+def oauth_start(provider_id: str, request: Request, return_to: str | None = None, user: User = Depends(current_user)) -> dict:
+    """Returns the provider's login URL. OpenRouter uses PKCE and issues an API key on approval."""
+    settings = request.app.state.settings
+    entry = catalog.provider(settings.catalog_dir, provider_id)
     if entry is None or "oauth" not in entry["auth_types"]:
         raise HTTPException(status_code=404, detail="oauth_not_supported")
-    # Provider OAuth apps (OpenRouter PKCE, GitHub, Google AI) are wired in a later milestone.
-    raise HTTPException(status_code=501, detail="oauth_adapter_not_implemented")
+    if provider_id != "openrouter":
+        raise HTTPException(status_code=501, detail="oauth_adapter_not_implemented")
+    if not vault.configured():
+        raise HTTPException(status_code=503, detail="vault_not_configured")
+    state = secrets.token_urlsafe(24)
+    verifier, challenge = pkce_pair()
+    with db.transaction() as conn:
+        conn.execute("DELETE FROM oauth_states WHERE created_at < ?", (_iso(_now() - timedelta(seconds=OAUTH_STATE_TTL)),))
+        conn.execute("INSERT INTO oauth_states(state, code_verifier, return_to, purpose, user_id) VALUES (?,?,?,?,?)",
+                     (state, verifier, safe_return_to(return_to, settings), "provider:openrouter", user.id))
+    # OpenRouter only appends ?code=, so the state travels in the callback path.
+    callback = settings.public_url.rstrip("/") + f"/providers/oauth/openrouter/callback/{state}"
+    return {"authorize_url": OPENROUTER_AUTH + "?" + urlencode({"callback_url": callback, "code_challenge": challenge, "code_challenge_method": "S256"})}
+
+
+@router.get("/oauth/openrouter/callback/{state}")
+def openrouter_callback(state: str, request: Request, code: str | None = None) -> RedirectResponse:
+    settings = request.app.state.settings
+    with db.transaction() as conn:
+        row = conn.execute("SELECT * FROM oauth_states WHERE state=? AND purpose='provider:openrouter' AND created_at > ?",
+                           (state, _iso(_now() - timedelta(seconds=OAUTH_STATE_TTL)))).fetchone()
+        conn.execute("DELETE FROM oauth_states WHERE state=?", (state,))
+    if row is None:
+        raise HTTPException(status_code=400, detail="invalid_or_expired_state")
+    back = row["return_to"] or safe_return_to(None, settings)
+    # The login must finish in the same browser session that started it.
+    try:
+        if current_user(request).id != row["user_id"]:
+            return RedirectResponse(_append_query(back, connect_error="session_mismatch"), status_code=302)
+    except HTTPException:
+        return RedirectResponse(_append_query(back, connect_error="not_signed_in"), status_code=302)
+    if not code:
+        return RedirectResponse(_append_query(back, connect_error="denied"), status_code=302)
+    transport = getattr(request.app.state, "http_transport", None)
+    try:
+        with httpx.Client(timeout=20, transport=transport) as client:
+            res = client.post(OPENROUTER_KEYS, json={"code": code, "code_verifier": row["code_verifier"], "code_challenge_method": "S256"})
+        key = res.json().get("key") if res.status_code == 200 else None
+    except (httpx.HTTPError, ValueError):
+        key = None
+    if not key:
+        return RedirectResponse(_append_query(back, connect_error="key_exchange_failed"), status_code=302)
+    entry = catalog.provider(settings.catalog_dir, "openrouter")
+    try:
+        with db.transaction() as conn:
+            installed = install_connection(conn, row["user_id"], entry, auth_type="oauth", secret=key, transport=transport)
+    except HTTPException as exc:
+        return RedirectResponse(_append_query(back, connect_error=str(exc.detail)), status_code=302)
+    return RedirectResponse(_append_query(back, connected="openrouter", status=installed["status"]), status_code=302)

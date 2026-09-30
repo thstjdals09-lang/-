@@ -107,7 +107,7 @@ export function dashboard(app) {
       const unlimited = !e.quota.limit;
       const pct = unlimited ? 100 : remainingRatio(e) * 100;
       return '<div class="quotaRow"><div><strong>' + esc(e.name) + "</strong><small>" + (unlimited ? "무제한" : fmtNum(e.quota.limit - e.quota.used) + " " + esc(e.quota.unit) + " 남음") + "</small></div>" +
-        (atReserve(e) ? pill("reserve") : e.cooldownUntil > ctx.now ? pill("cooldown") : e.status !== "online" ? pill(e.status) : "") +
+        (e.connectionMode === "simulated" ? '<span class="pill bad">가짜</span>' : atReserve(e) ? pill("reserve") : e.cooldownUntil > ctx.now ? pill("cooldown") : e.status !== "online" ? pill(e.status) : "") +
         meter(pct, { reserve: unlimited ? null : e.quota.reserve, label: e.name + " 쿼터" }) + "</div>";
     }).join("") +
     "</div></section>";

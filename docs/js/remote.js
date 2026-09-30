@@ -33,8 +33,8 @@ function simulatedEmployee(ctx) {
   const local = ctx.providers.find((p) => p.id === "local-llamacpp");
   const e = employeeFromCatalog(local, ctx);
   e.id = SIM_EMPLOYEE_ID;
-  e.name = "Simulated Local Worker";
-  e.model = "server simulation";
+  e.name = "가짜 시뮬레이션 워커";
+  e.model = "AI 아님 · 서버 시뮬레이션";
   e.synthetic = true;
   return e;
 }

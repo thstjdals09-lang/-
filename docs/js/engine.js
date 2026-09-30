@@ -117,12 +117,12 @@ export function employeeFromCatalog(entry, ctx, overrides = {}) {
 }
 
 export function createState(ctx) {
-  const local = ctx.providers.find((p) => p.id === "local-llamacpp");
+  // No AI is pre-installed: real AIs are added through the marketplace (backend mode).
   return {
     version: STATE_VERSION,
     user: { signedIn: false, mode: null, email: null, name: null },
     settings: defaultSettings(),
-    employees: local ? [employeeFromCatalog(local, ctx)] : [],
+    employees: [],
     projects: [],
     ideas: [],
     lines: [],
@@ -416,8 +416,11 @@ export function ensureContinuity(state, ctx) {
     return;
   }
   if (local) {
-    state.employees.push(employeeFromCatalog(local, ctx));
-    addLog(state, ctx, "AUTO HIRE", "모든 외부 AI가 사용 불가 → Local Unlimited Worker 자동 투입");
+    const worker = employeeFromCatalog(local, ctx);
+    worker.name = "가짜 시뮬레이션 워커";
+    worker.model = "AI 아님 · 규칙 기반 시뮬레이션";
+    state.employees.push(worker);
+    addLog(state, ctx, "AUTO HIRE", "사용 가능한 AI가 없음 → 가짜 시뮬레이션 워커 투입 (실제 AI 호출 없음)");
   }
 }
 

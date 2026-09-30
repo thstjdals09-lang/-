@@ -8,7 +8,12 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from . import auth, catalog, config, connections, vault
+import sys
+
+from . import auth, catalog, config, connections, envfile, vault
+
+if "pytest" not in sys.modules:
+    envfile.load()  # backend/.env for local runs; real environment variables always win
 from .auth import User, csrf_guard, current_user
 from .factory import api as factory_api
 from .factory.leader import autopilot_pass

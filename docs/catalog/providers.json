@@ -9,10 +9,16 @@
       "vendor": "llama.cpp",
       "adapter": "openai_compatible",
       "adapter_status": "available",
-      "auth_types": ["local"],
+      "auth_types": [
+        "local"
+      ],
       "base_url": "http://127.0.0.1:8080/v1",
       "default_model": "local-gguf",
-      "categories": ["local", "coding", "planning"],
+      "categories": [
+        "local",
+        "coding",
+        "planning"
+      ],
       "recommended": true,
       "free": true,
       "cost_tier": 0,
@@ -20,13 +26,34 @@
       "context_length": 32768,
       "speed": 45,
       "reliability": 95,
-      "skills": {"coding": 64, "planning": 58, "debugging": 57, "design": 38, "vision": 0, "qa": 70},
-      "modalities": ["text"],
-      "quota": {"unit": "unlimited", "limit": null, "window": null, "default_reserve": 0},
+      "skills": {
+        "coding": 64,
+        "planning": 58,
+        "debugging": 57,
+        "design": 38,
+        "vision": 0,
+        "qa": 70
+      },
+      "modalities": [
+        "text"
+      ],
+      "quota": {
+        "unit": "unlimited",
+        "limit": null,
+        "window": null,
+        "default_reserve": 0
+      },
       "quota_source": "local_hardware",
       "last_verified": null,
       "docs_url": "https://github.com/ggml-org/llama.cpp",
-      "summary": "무제한 안전망. 반복·단순 작업과 모든 외부 AI가 막혔을 때 공장을 유지합니다."
+      "summary": "무제한 안전망. 반복·단순 작업과 모든 외부 AI가 막혔을 때 공장을 유지합니다.",
+      "key_url": "https://github.com/ggml-org/llama.cpp#quick-start",
+      "key_prefix": null,
+      "key_steps": [
+        "llama.cpp를 설치하고 GGUF 모델을 받습니다",
+        "llama-server -m model.gguf --port 8080 실행",
+        "엔드포인트 http://127.0.0.1:8080/v1 로 연결"
+      ]
     },
     {
       "id": "local-ollama",
@@ -34,10 +61,15 @@
       "vendor": "Ollama",
       "adapter": "openai_compatible",
       "adapter_status": "available",
-      "auth_types": ["local"],
+      "auth_types": [
+        "local"
+      ],
       "base_url": "http://127.0.0.1:11434/v1",
       "default_model": "qwen2.5-coder",
-      "categories": ["local", "coding"],
+      "categories": [
+        "local",
+        "coding"
+      ],
       "recommended": false,
       "free": true,
       "cost_tier": 0,
@@ -45,13 +77,34 @@
       "context_length": 32768,
       "speed": 50,
       "reliability": 93,
-      "skills": {"coding": 66, "planning": 52, "debugging": 58, "design": 30, "vision": 0, "qa": 64},
-      "modalities": ["text"],
-      "quota": {"unit": "unlimited", "limit": null, "window": null, "default_reserve": 0},
+      "skills": {
+        "coding": 66,
+        "planning": 52,
+        "debugging": 58,
+        "design": 30,
+        "vision": 0,
+        "qa": 64
+      },
+      "modalities": [
+        "text"
+      ],
+      "quota": {
+        "unit": "unlimited",
+        "limit": null,
+        "window": null,
+        "default_reserve": 0
+      },
       "quota_source": "local_hardware",
       "last_verified": null,
       "docs_url": "https://ollama.com",
-      "summary": "로컬 코딩 보조. llama.cpp 대신 Ollama를 쓰는 PC용."
+      "summary": "로컬 코딩 보조. llama.cpp 대신 Ollama를 쓰는 PC용.",
+      "key_url": "https://ollama.com/download",
+      "key_prefix": null,
+      "key_steps": [
+        "Ollama 설치",
+        "ollama pull qwen2.5-coder",
+        "엔드포인트 http://127.0.0.1:11434/v1 로 연결"
+      ]
     },
     {
       "id": "gemini",
@@ -59,10 +112,16 @@
       "vendor": "Google",
       "adapter": "gemini",
       "adapter_status": "available",
-      "auth_types": ["api_key", "oauth"],
+      "auth_types": [
+        "api_key"
+      ],
       "base_url": "https://generativelanguage.googleapis.com/v1beta",
       "default_model": "gemini-2.5-flash",
-      "categories": ["coding", "planning", "vision"],
+      "categories": [
+        "coding",
+        "planning",
+        "vision"
+      ],
       "recommended": true,
       "free": true,
       "cost_tier": 1,
@@ -70,13 +129,35 @@
       "context_length": 1000000,
       "speed": 88,
       "reliability": 91,
-      "skills": {"coding": 88, "planning": 95, "debugging": 86, "design": 90, "vision": 96, "qa": 86},
-      "modalities": ["text", "vision"],
-      "quota": {"unit": "requests", "limit": 250, "window": "day", "default_reserve": 0.2},
+      "skills": {
+        "coding": 88,
+        "planning": 95,
+        "debugging": 86,
+        "design": 90,
+        "vision": 96,
+        "qa": 86
+      },
+      "modalities": [
+        "text",
+        "vision"
+      ],
+      "quota": {
+        "unit": "requests",
+        "limit": 250,
+        "window": "day",
+        "default_reserve": 0.2
+      },
       "quota_source": "seed_estimate",
       "last_verified": null,
       "docs_url": "https://ai.google.dev/gemini-api/docs/rate-limits",
-      "summary": "기획·멀티모달·비전 QA. 요청 수가 희소하므로 어려운 작업에 우선 배정."
+      "summary": "기획·멀티모달·비전 QA. 요청 수가 희소하므로 어려운 작업에 우선 배정.",
+      "key_url": "https://aistudio.google.com/app/apikey",
+      "key_prefix": "AIza",
+      "key_steps": [
+        "Google 계정으로 Google AI Studio 로그인",
+        "'Create API key' 클릭 후 키 복사",
+        "아래에 붙여넣기 (AIza…로 시작)"
+      ]
     },
     {
       "id": "cerebras",
@@ -84,10 +165,15 @@
       "vendor": "Cerebras",
       "adapter": "openai_compatible",
       "adapter_status": "available",
-      "auth_types": ["api_key"],
+      "auth_types": [
+        "api_key"
+      ],
       "base_url": "https://api.cerebras.ai/v1",
       "default_model": "gpt-oss-120b",
-      "categories": ["coding", "planning"],
+      "categories": [
+        "coding",
+        "planning"
+      ],
       "recommended": true,
       "free": true,
       "cost_tier": 1,
@@ -95,13 +181,34 @@
       "context_length": 65536,
       "speed": 99,
       "reliability": 88,
-      "skills": {"coding": 92, "planning": 82, "debugging": 88, "design": 50, "vision": 0, "qa": 82},
-      "modalities": ["text"],
-      "quota": {"unit": "tokens", "limit": 1000000, "window": "day", "default_reserve": 0.12},
+      "skills": {
+        "coding": 92,
+        "planning": 82,
+        "debugging": 88,
+        "design": 50,
+        "vision": 0,
+        "qa": 82
+      },
+      "modalities": [
+        "text"
+      ],
+      "quota": {
+        "unit": "tokens",
+        "limit": 1000000,
+        "window": "day",
+        "default_reserve": 0.12
+      },
       "quota_source": "seed_estimate",
       "last_verified": null,
       "docs_url": "https://inference-docs.cerebras.ai/support/rate-limits",
-      "summary": "초고속 구현. 토큰 무료량이 커서 중간 난이도 코딩의 주력."
+      "summary": "초고속 구현. 토큰 무료량이 커서 중간 난이도 코딩의 주력.",
+      "key_url": "https://cloud.cerebras.ai/",
+      "key_prefix": "csk-",
+      "key_steps": [
+        "Cerebras Cloud 가입/로그인",
+        "API Keys 메뉴에서 키 생성",
+        "아래에 붙여넣기 (csk-…로 시작)"
+      ]
     },
     {
       "id": "groq",
@@ -109,10 +216,15 @@
       "vendor": "Groq",
       "adapter": "openai_compatible",
       "adapter_status": "available",
-      "auth_types": ["api_key"],
+      "auth_types": [
+        "api_key"
+      ],
       "base_url": "https://api.groq.com/openai/v1",
       "default_model": "llama-3.3-70b-versatile",
-      "categories": ["coding", "planning"],
+      "categories": [
+        "coding",
+        "planning"
+      ],
       "recommended": true,
       "free": true,
       "cost_tier": 1,
@@ -120,13 +232,34 @@
       "context_length": 131072,
       "speed": 100,
       "reliability": 87,
-      "skills": {"coding": 84, "planning": 78, "debugging": 80, "design": 42, "vision": 0, "qa": 88},
-      "modalities": ["text"],
-      "quota": {"unit": "requests", "limit": 1000, "window": "day", "default_reserve": 0.15},
+      "skills": {
+        "coding": 84,
+        "planning": 78,
+        "debugging": 80,
+        "design": 42,
+        "vision": 0,
+        "qa": 88
+      },
+      "modalities": [
+        "text"
+      ],
+      "quota": {
+        "unit": "requests",
+        "limit": 1000,
+        "window": "day",
+        "default_reserve": 0.15
+      },
       "quota_source": "seed_estimate",
       "last_verified": null,
       "docs_url": "https://console.groq.com/docs/rate-limits",
-      "summary": "빠른 보조 코딩과 QA 체크리스트."
+      "summary": "빠른 보조 코딩과 QA 체크리스트.",
+      "key_url": "https://console.groq.com/keys",
+      "key_prefix": "gsk_",
+      "key_steps": [
+        "GroqCloud 로그인 (Google/GitHub 계정 가능)",
+        "'Create API Key' 클릭 후 복사",
+        "아래에 붙여넣기 (gsk_…로 시작)"
+      ]
     },
     {
       "id": "openrouter",
@@ -134,10 +267,17 @@
       "vendor": "OpenRouter",
       "adapter": "openai_compatible",
       "adapter_status": "available",
-      "auth_types": ["oauth", "api_key"],
+      "auth_types": [
+        "oauth",
+        "api_key"
+      ],
       "base_url": "https://openrouter.ai/api/v1",
       "default_model": "openrouter/free",
-      "categories": ["coding", "planning", "vision"],
+      "categories": [
+        "coding",
+        "planning",
+        "vision"
+      ],
       "recommended": false,
       "free": true,
       "cost_tier": 1,
@@ -145,13 +285,34 @@
       "context_length": 65536,
       "speed": 70,
       "reliability": 76,
-      "skills": {"coding": 80, "planning": 82, "debugging": 76, "design": 66, "vision": 55, "qa": 78},
-      "modalities": ["text", "vision"],
-      "quota": {"unit": "requests", "limit": 50, "window": "day", "default_reserve": 0.2},
+      "skills": {
+        "coding": 80,
+        "planning": 82,
+        "debugging": 76,
+        "design": 66,
+        "vision": 55,
+        "qa": 78
+      },
+      "modalities": [
+        "text",
+        "vision"
+      ],
+      "quota": {
+        "unit": "requests",
+        "limit": 50,
+        "window": "day",
+        "default_reserve": 0.2
+      },
       "quota_source": "seed_estimate",
       "last_verified": null,
       "docs_url": "https://openrouter.ai/docs/api-reference/limits",
-      "summary": "여러 무료 모델의 비상 대체 풀."
+      "summary": "여러 무료 모델의 비상 대체 풀.",
+      "key_url": "https://openrouter.ai/settings/keys",
+      "key_prefix": "sk-or-",
+      "key_steps": [
+        "'OpenRouter로 로그인' 버튼 → 승인하면 키가 자동으로 서버 Vault에 저장",
+        "또는 Keys 페이지에서 직접 만들어 붙여넣기 (sk-or-…)"
+      ]
     },
     {
       "id": "cloudflare",
@@ -159,10 +320,16 @@
       "vendor": "Cloudflare",
       "adapter": "cloudflare",
       "adapter_status": "available",
-      "auth_types": ["api_key"],
+      "auth_types": [
+        "api_key"
+      ],
       "base_url": "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1",
       "default_model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-      "categories": ["coding", "planning", "image"],
+      "categories": [
+        "coding",
+        "planning",
+        "image"
+      ],
       "recommended": false,
       "free": true,
       "cost_tier": 1,
@@ -170,13 +337,35 @@
       "context_length": 24000,
       "speed": 82,
       "reliability": 86,
-      "skills": {"coding": 74, "planning": 72, "debugging": 70, "design": 64, "vision": 40, "qa": 78},
-      "modalities": ["text", "image"],
-      "quota": {"unit": "neurons", "limit": 10000, "window": "day", "default_reserve": 0.12},
+      "skills": {
+        "coding": 74,
+        "planning": 72,
+        "debugging": 70,
+        "design": 64,
+        "vision": 40,
+        "qa": 78
+      },
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "quota": {
+        "unit": "neurons",
+        "limit": 10000,
+        "window": "day",
+        "default_reserve": 0.12
+      },
       "quota_source": "seed_estimate",
       "last_verified": null,
       "docs_url": "https://developers.cloudflare.com/workers-ai/platform/pricing/",
-      "summary": "일일 무료 뉴런. 범용 잡무와 이미지 생성."
+      "summary": "일일 무료 뉴런. 범용 잡무와 이미지 생성.",
+      "key_url": "https://dash.cloudflare.com/profile/api-tokens",
+      "key_prefix": null,
+      "key_steps": [
+        "Cloudflare 로그인",
+        "API Tokens → 'Workers AI' 템플릿으로 토큰 생성",
+        "대시보드 우측의 Account ID와 토큰을 아래에 입력"
+      ]
     },
     {
       "id": "mistral",
@@ -184,10 +373,15 @@
       "vendor": "Mistral AI",
       "adapter": "openai_compatible",
       "adapter_status": "available",
-      "auth_types": ["api_key"],
+      "auth_types": [
+        "api_key"
+      ],
       "base_url": "https://api.mistral.ai/v1",
       "default_model": "mistral-small-latest",
-      "categories": ["coding", "planning"],
+      "categories": [
+        "coding",
+        "planning"
+      ],
       "recommended": false,
       "free": true,
       "cost_tier": 1,
@@ -195,13 +389,34 @@
       "context_length": 131072,
       "speed": 80,
       "reliability": 86,
-      "skills": {"coding": 86, "planning": 84, "debugging": 82, "design": 60, "vision": 50, "qa": 82},
-      "modalities": ["text"],
-      "quota": {"unit": "requests", "limit": 500, "window": "day", "default_reserve": 0.15},
+      "skills": {
+        "coding": 86,
+        "planning": 84,
+        "debugging": 82,
+        "design": 60,
+        "vision": 50,
+        "qa": 82
+      },
+      "modalities": [
+        "text"
+      ],
+      "quota": {
+        "unit": "requests",
+        "limit": 500,
+        "window": "day",
+        "default_reserve": 0.15
+      },
       "quota_source": "seed_estimate",
       "last_verified": null,
       "docs_url": "https://docs.mistral.ai/deployment/laplateforme/tier/",
-      "summary": "코딩·기획 보조. 실험용 무료 등급."
+      "summary": "코딩·기획 보조. 실험용 무료 등급.",
+      "key_url": "https://console.mistral.ai/api-keys",
+      "key_prefix": null,
+      "key_steps": [
+        "Mistral 콘솔 로그인",
+        "무료 Experiment 플랜 선택 후 API Key 생성",
+        "아래에 붙여넣기"
+      ]
     },
     {
       "id": "github-models",
@@ -209,10 +424,15 @@
       "vendor": "GitHub",
       "adapter": "openai_compatible",
       "adapter_status": "available",
-      "auth_types": ["oauth", "api_key"],
+      "auth_types": [
+        "api_key"
+      ],
       "base_url": "https://models.github.ai/inference",
       "default_model": "openai/gpt-4.1-mini",
-      "categories": ["coding", "planning"],
+      "categories": [
+        "coding",
+        "planning"
+      ],
       "recommended": false,
       "free": true,
       "cost_tier": 1,
@@ -220,13 +440,34 @@
       "context_length": 8000,
       "speed": 72,
       "reliability": 84,
-      "skills": {"coding": 85, "planning": 83, "debugging": 83, "design": 58, "vision": 60, "qa": 80},
-      "modalities": ["text"],
-      "quota": {"unit": "requests", "limit": 150, "window": "day", "default_reserve": 0.2},
+      "skills": {
+        "coding": 85,
+        "planning": 83,
+        "debugging": 83,
+        "design": 58,
+        "vision": 60,
+        "qa": 80
+      },
+      "modalities": [
+        "text"
+      ],
+      "quota": {
+        "unit": "requests",
+        "limit": 150,
+        "window": "day",
+        "default_reserve": 0.2
+      },
       "quota_source": "seed_estimate",
       "last_verified": null,
       "docs_url": "https://docs.github.com/en/github-models/use-github-models/prototyping-with-ai-models",
-      "summary": "GitHub 계정으로 쓰는 프로토타입용 모델. 짧은 컨텍스트."
+      "summary": "GitHub 계정으로 쓰는 프로토타입용 모델. 짧은 컨텍스트.",
+      "key_url": "https://github.com/settings/personal-access-tokens/new",
+      "key_prefix": "github_pat_",
+      "key_steps": [
+        "GitHub 로그인",
+        "Fine-grained token 생성 → Permissions에서 'Models: Read' 선택",
+        "아래에 붙여넣기 (github_pat_…)"
+      ]
     },
     {
       "id": "huggingface",
@@ -234,10 +475,16 @@
       "vendor": "Hugging Face",
       "adapter": "openai_compatible",
       "adapter_status": "available",
-      "auth_types": ["api_key"],
+      "auth_types": [
+        "api_key"
+      ],
       "base_url": "https://router.huggingface.co/v1",
       "default_model": "auto",
-      "categories": ["image", "audio", "coding"],
+      "categories": [
+        "image",
+        "audio",
+        "coding"
+      ],
       "recommended": false,
       "free": true,
       "cost_tier": 1,
@@ -245,13 +492,36 @@
       "context_length": 32768,
       "speed": 60,
       "reliability": 78,
-      "skills": {"coding": 72, "planning": 68, "debugging": 66, "design": 70, "vision": 50, "qa": 66},
-      "modalities": ["text", "image", "audio"],
-      "quota": {"unit": "credits", "limit": 100, "window": "month", "default_reserve": 0.2},
+      "skills": {
+        "coding": 72,
+        "planning": 68,
+        "debugging": 66,
+        "design": 70,
+        "vision": 50,
+        "qa": 66
+      },
+      "modalities": [
+        "text",
+        "image",
+        "audio"
+      ],
+      "quota": {
+        "unit": "credits",
+        "limit": 100,
+        "window": "month",
+        "default_reserve": 0.2
+      },
       "quota_source": "seed_estimate",
       "last_verified": null,
       "docs_url": "https://huggingface.co/docs/inference-providers/pricing",
-      "summary": "이미지·오디오 모델 모음. 월 무료 크레딧."
+      "summary": "이미지·오디오 모델 모음. 월 무료 크레딧.",
+      "key_url": "https://huggingface.co/settings/tokens",
+      "key_prefix": "hf_",
+      "key_steps": [
+        "Hugging Face 로그인",
+        "Access Tokens → 'Make calls to Inference Providers' 권한으로 생성",
+        "아래에 붙여넣기 (hf_…)"
+      ]
     },
     {
       "id": "local-comfyui",
@@ -259,10 +529,15 @@
       "vendor": "ComfyUI",
       "adapter": "comfyui",
       "adapter_status": "planned",
-      "auth_types": ["local"],
+      "auth_types": [
+        "local"
+      ],
       "base_url": "http://127.0.0.1:8188",
       "default_model": "sdxl",
-      "categories": ["local", "image"],
+      "categories": [
+        "local",
+        "image"
+      ],
       "recommended": false,
       "free": true,
       "cost_tier": 0,
@@ -270,13 +545,33 @@
       "context_length": 0,
       "speed": 35,
       "reliability": 90,
-      "skills": {"coding": 0, "planning": 0, "debugging": 0, "design": 78, "vision": 0, "qa": 0},
-      "modalities": ["image"],
-      "quota": {"unit": "unlimited", "limit": null, "window": null, "default_reserve": 0},
+      "skills": {
+        "coding": 0,
+        "planning": 0,
+        "debugging": 0,
+        "design": 78,
+        "vision": 0,
+        "qa": 0
+      },
+      "modalities": [
+        "image"
+      ],
+      "quota": {
+        "unit": "unlimited",
+        "limit": null,
+        "window": null,
+        "default_reserve": 0
+      },
       "quota_source": "local_hardware",
       "last_verified": null,
       "docs_url": "https://github.com/comfyanonymous/ComfyUI",
-      "summary": "로컬 GPU 아트 생성. 스프라이트·배경 시안."
+      "summary": "로컬 GPU 아트 생성. 스프라이트·배경 시안.",
+      "key_url": "https://github.com/comfyanonymous/ComfyUI",
+      "key_prefix": null,
+      "key_steps": [
+        "ComfyUI 실행 (기본 포트 8188)",
+        "어댑터 준비 중"
+      ]
     },
     {
       "id": "local-audio",
@@ -284,10 +579,15 @@
       "vendor": "Open source",
       "adapter": "local_audio",
       "adapter_status": "planned",
-      "auth_types": ["local"],
+      "auth_types": [
+        "local"
+      ],
       "base_url": "http://127.0.0.1:5002",
       "default_model": "piper-tts",
-      "categories": ["local", "audio"],
+      "categories": [
+        "local",
+        "audio"
+      ],
       "recommended": false,
       "free": true,
       "cost_tier": 0,
@@ -295,13 +595,33 @@
       "context_length": 0,
       "speed": 55,
       "reliability": 90,
-      "skills": {"coding": 0, "planning": 0, "debugging": 0, "design": 60, "vision": 0, "qa": 0},
-      "modalities": ["audio"],
-      "quota": {"unit": "unlimited", "limit": null, "window": null, "default_reserve": 0},
+      "skills": {
+        "coding": 0,
+        "planning": 0,
+        "debugging": 0,
+        "design": 60,
+        "vision": 0,
+        "qa": 0
+      },
+      "modalities": [
+        "audio"
+      ],
+      "quota": {
+        "unit": "unlimited",
+        "limit": null,
+        "window": null,
+        "default_reserve": 0
+      },
       "quota_source": "local_hardware",
       "last_verified": null,
       "docs_url": "https://github.com/rhasspy/piper",
-      "summary": "효과음·보이스 가이드 로컬 생성."
+      "summary": "효과음·보이스 가이드 로컬 생성.",
+      "key_url": "https://github.com/rhasspy/piper",
+      "key_prefix": null,
+      "key_steps": [
+        "Piper/whisper.cpp 서버 실행",
+        "어댑터 준비 중"
+      ]
     },
     {
       "id": "custom-endpoint",
@@ -309,10 +629,15 @@
       "vendor": "Custom",
       "adapter": "openai_compatible",
       "adapter_status": "available",
-      "auth_types": ["custom_endpoint"],
+      "auth_types": [
+        "custom_endpoint"
+      ],
       "base_url": null,
       "default_model": "custom",
-      "categories": ["coding", "planning"],
+      "categories": [
+        "coding",
+        "planning"
+      ],
       "recommended": false,
       "free": true,
       "cost_tier": 1,
@@ -320,13 +645,33 @@
       "context_length": 32768,
       "speed": 60,
       "reliability": 80,
-      "skills": {"coding": 70, "planning": 70, "debugging": 68, "design": 50, "vision": 0, "qa": 70},
-      "modalities": ["text"],
-      "quota": {"unit": "unknown", "limit": null, "window": null, "default_reserve": 0.15},
+      "skills": {
+        "coding": 70,
+        "planning": 70,
+        "debugging": 68,
+        "design": 50,
+        "vision": 0,
+        "qa": 70
+      },
+      "modalities": [
+        "text"
+      ],
+      "quota": {
+        "unit": "unknown",
+        "limit": null,
+        "window": null,
+        "default_reserve": 0.15
+      },
       "quota_source": "user_defined",
       "last_verified": null,
       "docs_url": null,
-      "summary": "vLLM·LM Studio·사내 게이트웨이 등 직접 지정한 엔드포인트."
+      "summary": "vLLM·LM Studio·사내 게이트웨이 등 직접 지정한 엔드포인트.",
+      "key_url": null,
+      "key_prefix": null,
+      "key_steps": [
+        "OpenAI 호환 서버 주소(…/v1) 입력",
+        "필요하면 키 입력"
+      ]
     },
     {
       "id": "anthropic",
@@ -334,10 +679,16 @@
       "vendor": "Anthropic",
       "adapter": "anthropic",
       "adapter_status": "planned",
-      "auth_types": ["api_key"],
+      "auth_types": [
+        "api_key"
+      ],
       "base_url": "https://api.anthropic.com/v1",
       "default_model": "claude-sonnet-5",
-      "categories": ["coding", "planning", "vision"],
+      "categories": [
+        "coding",
+        "planning",
+        "vision"
+      ],
       "recommended": false,
       "free": false,
       "cost_tier": 3,
@@ -345,13 +696,35 @@
       "context_length": 200000,
       "speed": 75,
       "reliability": 95,
-      "skills": {"coding": 97, "planning": 96, "debugging": 97, "design": 88, "vision": 92, "qa": 93},
-      "modalities": ["text", "vision"],
-      "quota": {"unit": "credits", "limit": 20, "window": "month", "default_reserve": 0.25},
+      "skills": {
+        "coding": 97,
+        "planning": 96,
+        "debugging": 97,
+        "design": 88,
+        "vision": 92,
+        "qa": 93
+      },
+      "modalities": [
+        "text",
+        "vision"
+      ],
+      "quota": {
+        "unit": "credits",
+        "limit": 20,
+        "window": "month",
+        "default_reserve": 0.25
+      },
       "quota_source": "user_budget",
       "last_verified": null,
       "docs_url": "https://docs.anthropic.com",
-      "summary": "유료. 무료 AI로 품질 기준을 못 넘는 최고 난이도 리뷰·디버깅에만 사용."
+      "summary": "유료. 무료 AI로 품질 기준을 못 넘는 최고 난이도 리뷰·디버깅에만 사용.",
+      "key_url": "https://console.anthropic.com/settings/keys",
+      "key_prefix": "sk-ant-",
+      "key_steps": [
+        "Anthropic Console 로그인 (유료)",
+        "API Keys에서 키 생성",
+        "아래에 붙여넣기 (sk-ant-…)"
+      ]
     }
   ]
 }
