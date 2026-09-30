@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from .. import db
 from ..auth import User, csrf_guard, current_user
 from ..connections import row_to_out
+from .github_sync import GitHubSync
 from .leader import DEFAULT_USER_SETTINGS, CapacityError, Factory
 
 router = APIRouter(tags=["factory"], dependencies=[Depends(csrf_guard)])
@@ -45,7 +46,8 @@ def factory(request: Request) -> Factory:
 def get_factory(app) -> Factory:
     if getattr(app.state, "factory", None) is None:
         s = app.state.settings
-        app.state.factory = Factory(s.catalog_dir, s.workspace_dir, simulate=s.simulate_without_providers, transport=getattr(app.state, "http_transport", None))
+        app.state.factory = Factory(s.catalog_dir, s.workspace_dir, simulate=s.simulate_without_providers, transport=getattr(app.state, "http_transport", None),
+                                    github=getattr(app.state, "github_sync", None) or GitHubSync.from_environment())
     return app.state.factory
 
 
@@ -115,7 +117,12 @@ def line_detail(f: Factory, conn, line) -> dict:
     ]
     feedback = [dict(r) for r in conn.execute("SELECT id, text, stage_key, status, created_at FROM feedback WHERE line_id=? ORDER BY created_at DESC", (line["id"],))]
     artifacts = [{"name": a["path"], "stageId": a["stage_key"]} for a in conn.execute("SELECT path, stage_key FROM artifacts WHERE line_id=? ORDER BY id", (line["id"],))]
-    return {**line_summary(f, conn, line), "stages": stages, "commits": commits, "builds": builds, "messages": messages, "feedback": feedback, "artifacts": artifacts}
+    pub = conn.execute(
+        "SELECT * FROM publications WHERE line_id=? ORDER BY (kind='pages' AND status='published') DESC, created_at DESC, rowid DESC LIMIT 1", (line["id"],)
+    ).fetchone()
+    publication = {"kind": pub["kind"], "status": pub["status"], "repositoryUrl": pub["repository_url"], "pagesUrl": pub["pages_url"],
+                   "commit": pub["commit_sha"], "detail": pub["detail"], "time": pub["created_at"]} if pub else None
+    return {**line_summary(f, conn, line), "publication": publication, "stages": stages, "commits": commits, "builds": builds, "messages": messages, "feedback": feedback, "artifacts": artifacts}
 
 
 # ---------------------------------------------------------------- settings / dashboard
@@ -224,6 +231,15 @@ def autopilot(line_id: str, payload: Toggle, user: User = Depends(current_user))
         _owned_line(conn, user.id, line_id)
         conn.execute("UPDATE production_lines SET autopilot=? WHERE id=?", (int(payload.on), line_id))
         return {"autopilot": payload.on}
+
+
+@router.post("/lines/{line_id}/publish")
+def publish(line_id: str, request: Request, user: User = Depends(current_user)) -> dict:
+    with db.transaction() as conn:
+        line = _owned_line(conn, user.id, line_id)
+        if line["status"] not in ("awaiting_ceo", "complete"):
+            raise HTTPException(status_code=409, detail="release_not_ready")
+        return factory(request).publish_release(conn, user.id, line_id)
 
 
 @router.post("/lines/{line_id}/feedback", status_code=201)

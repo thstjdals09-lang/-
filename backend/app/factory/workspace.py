@@ -54,8 +54,8 @@ class LineWorkspace:
         self.repo = self.root / "repo"
         self.trees = self.root / "wt"
 
-    def _git(self, *args: str, cwd: Path | None = None, author: str = "AI Factory") -> str:
-        env = {**os.environ, **GIT_ENV}
+    def _git(self, *args: str, cwd: Path | None = None, author: str = "AI Factory", extra_env: dict | None = None) -> str:
+        env = {**os.environ, **GIT_ENV, **(extra_env or {})}
         cmd = ["git", "-c", f"user.name={author}", "-c", "user.email=ai-factory@localhost", "-c", "core.autocrlf=false", "-c", "core.longpaths=true", *args]
         res = subprocess.run(cmd, cwd=cwd or self.repo, env=env, capture_output=True, text=True, encoding="utf-8")
         if res.returncode != 0:
@@ -118,6 +118,13 @@ class LineWorkspace:
                 target.write_text(content, encoding="utf-8")
         self._git("add", "-A")
         self._git("commit", "-q", "--allow-empty", "-m", message, author=author)
+        return self._git("rev-parse", "HEAD")
+
+    def git_env(self, extra_env: dict, *args: str) -> str:
+        """Runs git with extra environment (e.g. GIT_CONFIG_* credentials kept out of argv)."""
+        return self._git(*args, extra_env=extra_env)
+
+    def head(self) -> str:
         return self._git("rev-parse", "HEAD")
 
     def read_bytes(self, rel: str) -> bytes | None:

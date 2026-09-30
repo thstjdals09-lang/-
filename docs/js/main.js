@@ -13,7 +13,9 @@ import * as floor from "./views-floor.js";
 import * as ai from "./views-ai.js";
 import * as ops from "./views-ops.js";
 
-const STATE_KEY = "ai-factory-studio-v4";
+const STATE_KEY = "ai-factory-studio-v5";
+// Earlier builds' test data (lines, games, logs) is discarded so the console starts clean.
+const OBSOLETE_KEYS = ["ai-factory-studio-v3", "ai-factory-studio-v4"];
 const UI_KEY = "ai-factory-ui-v1";
 const TICK_MS = 1600;
 const LIVE_TABS = new Set(["dashboard", "lines", "team", "logs"]);
@@ -576,6 +578,9 @@ async function boot() {
   ]);
   catalog = { providers: providers.providers, updated: providers.catalog_updated, studio };
   app.ctx = makeCtx();
+  for (const key of OBSOLETE_KEYS) {
+    try { localStorage.removeItem(key); } catch { /* storage blocked */ }
+  }
   const saved = readJson(STATE_KEY);
   app.state = saved && saved.version === STATE_VERSION ? saved : createState(app.ctx);
   if (!app.state.settings.backendUrl && location.pathname.startsWith("/console")) app.state.settings.backendUrl = location.origin;

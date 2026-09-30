@@ -23,7 +23,9 @@ from ..providers import AdapterUnavailable, build_adapter
 from . import games, runtime_qa
 from .executor import SIM_ID, SIM_NAME, AllProvidersFailed, TaskContext, build_prompt, extract_game, qa_verdict, run_with_failover, simulate, to_file_content
 from .ideation import generate_ideas, slugify
-from .workspace import LineWorkspace
+from .github_sync import GitHubSync, GitHubSyncError, RepoRef, repo_name
+from .workspace import LineWorkspace, WorkspaceError
+from ..github_publisher import GitHubAPIError
 
 FALLBACK_KIND = {"vision": "qa", "image": "design", "audio": "design"}
 GAME_PATH = "game/index.html"  # the canonical, always-playable game on main
@@ -68,11 +70,12 @@ def _id(prefix: str) -> str:
 
 
 class Factory:
-    def __init__(self, catalog_dir: Path, workspace_dir: Path, *, simulate: bool = True, transport=None):
+    def __init__(self, catalog_dir: Path, workspace_dir: Path, *, simulate: bool = True, transport=None, github: GitHubSync | None = None):
         self.catalog_dir = catalog_dir
         self.workspace_dir = Path(workspace_dir)
         self.simulate = simulate
         self.transport = transport
+        self.github = github
         self.studio = catalog.studio(catalog_dir)
         self.stages = self.studio["stages"]
         self._locks: dict[str, threading.Lock] = {}
@@ -430,6 +433,7 @@ class Factory:
                              (_id("rev"), line["id"], build_id, "release_candidate" if stage_def.get("ceo_gate") else "milestone", int(bool(stage_def.get("ceo_gate")))))
         conn.execute("UPDATE stages SET status='completed', qa_status='passed', completed_at=? WHERE id=?", (_iso(), stage_row["id"]))
         self.log(conn, user_id, "STAGE COMPLETE", f"{line['title']} · {stage_def['name']} 통과", line["id"])
+        self.sync_line(conn, user_id, line)
         if stage_def.get("ceo_gate"):
             conn.execute("UPDATE production_lines SET status='awaiting_ceo', leader_state='gate', leader_decision='릴리즈 빌드 CEO 승인 대기' WHERE id=?", (line["id"],))
             return
@@ -451,6 +455,72 @@ class Factory:
         self.log(conn, user_id, "RUNTIME QA FAIL", f"{line['title']} · {stage_def['name']} 빌드 실행 검사 실패 ({errors}) → 자동 수정 {done + 1}/{MAX_RUNTIME_FIXES}", line["id"])
         self.message(conn, line["id"], "blocked", "Runtime QA", "Leader", errors, None)
         return True
+
+    # ------------------------------------------------------------------ GitHub
+
+    def _publication(self, conn, line_id, **fields):
+        conn.execute(
+            "INSERT INTO publications(id, line_id, kind, status, repository, repository_url, pages_url, commit_sha, detail) VALUES (?,?,?,?,?,?,?,?,?)",
+            (_id("pub"), line_id, fields["kind"], fields["status"], fields.get("repository"), fields.get("repository_url"),
+             fields.get("pages_url"), fields.get("commit_sha"), fields.get("detail")),
+        )
+
+    def _repo_ref(self, conn, line) -> RepoRef | None:
+        row = conn.execute(
+            "SELECT repository, repository_url FROM publications WHERE line_id=? AND repository IS NOT NULL AND status IN ('synced','published') ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            (line["id"],),
+        ).fetchone()
+        if not row:
+            return None
+        owner, repo = row["repository"].split("/", 1)
+        return RepoRef(owner, repo, row["repository_url"])
+
+    def sync_line(self, conn, user_id, line) -> RepoRef | None:
+        """Pushes the line repository (full task history) to GitHub. Best effort: never blocks production."""
+        if not self.github:
+            return None
+        conn.commit()  # no DB write lock is held during network I/O
+        try:
+            ref = self._repo_ref(conn, line)
+            if ref is None:
+                idea = conn.execute("SELECT pitch FROM ideas WHERE id=?", (line["idea_id"],)).fetchone()
+                ref = self.github.ensure_repo(repo_name(line["project_slug"], line["slug"], line["id"]), f"AI Factory · {line['title']} · {idea['pitch'] if idea else ''}")
+            sha = self.github.push(self.workspace(user_id, line["id"]), ref)
+        except (GitHubSyncError, GitHubAPIError, WorkspaceError) as exc:
+            self._publication(conn, line["id"], kind="repository", status="failed", detail=vault.redact(str(exc))[:300])
+            self.log(conn, user_id, "GITHUB SYNC FAIL", f"{line['title']} · {vault.redact(str(exc))[:200]}", line["id"])
+            return None
+        self._publication(conn, line["id"], kind="repository", status="synced", repository=f"{ref.owner}/{ref.repo}", repository_url=ref.html_url, commit_sha=sha)
+        self.log(conn, user_id, "GITHUB SYNC", f"{line['title']} · {sha[:7]} → {ref.owner}/{ref.repo}", line["id"])
+        return ref
+
+    def publish_release(self, conn, user_id, line_id) -> dict:
+        """Release Manager: root index.html + README on main, push, enable GitHub Pages."""
+        line = conn.execute("SELECT * FROM production_lines WHERE id=? AND user_id=?", (line_id, user_id)).fetchone()
+        if line is None:
+            raise KeyError("line not found")
+        ws = self.workspace(user_id, line_id)
+        ws.ensure(line["title"])
+        idea = conn.execute("SELECT pitch FROM ideas WHERE id=?", (line["idea_id"],)).fetchone()
+        readme = f"# {line['title']}\n\n{idea['pitch'] if idea else ''}\n\n- Play: open `index.html` (or the GitHub Pages site)\n- Windows: `release/windows/Play.cmd`\n- Produced by AI Factory; every task is a merged `ai-factory/...` branch in this history.\n"
+        ws.commit_on_main({"index.html": self.current_game(ws, line), "README.md": readme}, f"release: publish {line['title']}", "Release Manager")
+        if not self.github:
+            self._publication(conn, line_id, kind="pages", status="not_configured", detail="AI_FACTORY_GITHUB_TOKEN is not set")
+            self.log(conn, user_id, "PUBLISH WAITING", f"{line['title']} · GitHub 토큰 미설정 → 로컬 저장소에만 릴리즈 커밋", line_id)
+            return {"status": "not_configured"}
+        ref = self.sync_line(conn, user_id, line)
+        if ref is None:
+            return {"status": "failed"}
+        try:
+            pages_url = self.github.enable_pages(ref)
+        except (GitHubSyncError, GitHubAPIError) as exc:
+            self._publication(conn, line_id, kind="pages", status="failed", repository=f"{ref.owner}/{ref.repo}", repository_url=ref.html_url, detail=str(exc)[:300])
+            self.log(conn, user_id, "PUBLISH FAIL", f"{line['title']} · {str(exc)[:200]}", line_id)
+            return {"status": "failed"}
+        self._publication(conn, line_id, kind="pages", status="published", repository=f"{ref.owner}/{ref.repo}", repository_url=ref.html_url,
+                          pages_url=pages_url, commit_sha=ws.head())
+        self.log(conn, user_id, "PUBLISHED", f"{line['title']} · {pages_url}", line_id)
+        return {"status": "published", "repository_url": ref.html_url, "pages_url": pages_url}
 
     def _advance(self, conn, user_id, line):
         if line["stage_index"] >= len(self.stages) - 1:
@@ -569,6 +639,7 @@ class Factory:
             conn.execute("UPDATE production_lines SET status='running' WHERE id=?", (review["line_id"],))
             line = conn.execute("SELECT * FROM production_lines WHERE id=?", (review["line_id"],)).fetchone()
             self._advance(conn, user_id, line)
+            self.publish_release(conn, user_id, review["line_id"])
 
     def request_revision(self, conn, user_id, review_id, note):
         review = conn.execute("SELECT r.*, l.user_id FROM reviews r JOIN production_lines l ON l.id=r.line_id WHERE r.id=?", (review_id,)).fetchone()

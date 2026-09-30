@@ -7,7 +7,7 @@ import { routeTask, usageFor, atReserve, classifyError, nextReset, remaining } f
 const FALLBACK_KIND = { vision: "qa", image: "design", audio: "design" };
 import { buildGame, gameFamily, smokeTest } from "./games.js";
 
-export const STATE_VERSION = 4;
+export const STATE_VERSION = 5;
 const MAX_LOGS = 400;
 const MAX_MESSAGES = 120;
 
