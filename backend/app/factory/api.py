@@ -185,7 +185,8 @@ def list_ideas(project_id: str, user: User = Depends(current_user)) -> list[dict
         if not conn.execute("SELECT 1 FROM projects WHERE id=? AND user_id=?", (project_id, user.id)).fetchone():
             raise HTTPException(status_code=404, detail="project_not_found")
         rows = conn.execute("SELECT * FROM ideas WHERE project_id=? ORDER BY rank", (project_id,)).fetchall()
-        return [{**dict(r), "loop": json.loads(r["loop"]), "metrics": json.loads(r["metrics"]), "reviews": json.loads(r["reviews"])} for r in rows]
+        return [{**dict(r), "loop": json.loads(r["loop"]), "metrics": json.loads(r["metrics"]), "reviews": json.loads(r["reviews"]),
+             "concept": json.loads(r["concept"]) if r["concept"] else None} for r in rows]
 
 
 @router.post("/ideas/{idea_id}/build", status_code=201)
@@ -333,7 +334,8 @@ def state(request: Request, user: User = Depends(current_user)) -> dict:
     with db.transaction() as conn:
         projects = [dict(r) for r in conn.execute("SELECT id, topic, genre, platform, notes, created_at FROM projects WHERE user_id=? ORDER BY created_at DESC", (user.id,))]
         ideas = [
-            {**dict(r), "loop": json.loads(r["loop"]), "metrics": json.loads(r["metrics"]), "reviews": json.loads(r["reviews"])}
+            {**dict(r), "loop": json.loads(r["loop"]), "metrics": json.loads(r["metrics"]), "reviews": json.loads(r["reviews"]),
+             "concept": json.loads(r["concept"]) if r["concept"] else None}
             for r in conn.execute("SELECT i.* FROM ideas i JOIN projects p ON p.id=i.project_id WHERE p.user_id=? ORDER BY p.created_at DESC, i.rank", (user.id,))
         ]
         lines = [line_detail(f, conn, l) for l in conn.execute("SELECT * FROM production_lines WHERE user_id=? ORDER BY created_at", (user.id,))]

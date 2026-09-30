@@ -62,7 +62,7 @@
         {"id": "scope", "name": "범위·비용 추정", "role": "Producer", "kind": "planning", "difficulty": 1, "depends": [], "artifact": "scope-estimate.md"},
         {"id": "tech", "name": "기술 타당성 검토", "role": "Technical Director", "kind": "planning", "difficulty": 2, "depends": [], "artifact": "tech-feasibility.md"},
         {"id": "risk", "name": "리스크 레지스터", "role": "QA", "kind": "qa", "difficulty": 1, "depends": ["loop", "tech"], "artifact": "risk-register.json"},
-        {"id": "gate", "name": "GO / REVISE / STOP 판정", "role": "Producer", "kind": "planning", "difficulty": 3, "critical": true, "depends": ["loop", "scope", "tech", "risk"], "artifact": "greenlight-report.md"}
+        {"id": "gate", "name": "GO / REVISE / STOP 판정", "role": "Producer", "kind": "planning", "difficulty": 3, "critical": true, "depends": ["loop", "scope", "tech", "risk"], "artifact": "greenlight-report.md", "judge": true}
       ]
     },
     {
@@ -84,7 +84,7 @@
         {"id": "state", "name": "입력·상태 머신", "role": "Systems Programmer", "kind": "coding", "difficulty": 2, "depends": ["scaffold"], "artifact": "src/state.js"},
         {"id": "hud", "name": "임시 UI/HUD", "role": "UI/UX", "kind": "coding", "difficulty": 1, "depends": ["core"], "artifact": "src/hud.js"},
         {"id": "playtest", "name": "프로토타입 플레이테스트", "role": "QA", "kind": "qa", "difficulty": 1, "depends": ["core", "state", "hud"], "artifact": "prototype-findings.md"},
-        {"id": "fun", "name": "재미 검증 리뷰", "role": "Game Director", "kind": "planning", "difficulty": 2, "critical": true, "depends": ["playtest"], "artifact": "fun-review.md"}
+        {"id": "fun", "name": "재미 검증 리뷰", "role": "Game Director", "kind": "planning", "difficulty": 2, "critical": true, "depends": ["playtest"], "artifact": "fun-review.md", "judge": true}
       ]
     },
     {
@@ -95,7 +95,7 @@
         {"id": "ui", "name": "UI 폴리시", "role": "UI/UX", "kind": "design", "difficulty": 2, "depends": ["feature"], "artifact": "src/ui.css"},
         {"id": "build", "name": "슬라이스 통합 빌드", "role": "Build Engineer", "kind": "coding", "difficulty": 1, "depends": ["feature", "artpass", "ui"], "artifact": "vertical-slice.zip"},
         {"id": "visualqa", "name": "비전 기반 화면 QA", "role": "QA", "kind": "vision", "difficulty": 2, "depends": ["build"], "artifact": "visual-review.md"},
-        {"id": "bar", "name": "품질 기준선 승인", "role": "Creative Director", "kind": "planning", "difficulty": 3, "critical": true, "depends": ["visualqa"], "artifact": "quality-bar.md"}
+        {"id": "bar", "name": "품질 기준선 승인", "role": "Creative Director", "kind": "planning", "difficulty": 3, "critical": true, "depends": ["visualqa"], "artifact": "quality-bar.md", "judge": true}
       ]
     },
     {
@@ -107,7 +107,7 @@
         {"id": "screens", "name": "메뉴·설정 화면", "role": "UI/UX", "kind": "coding", "difficulty": 1, "depends": [], "artifact": "src/screens.js"},
         {"id": "assets", "name": "아트 에셋 제작", "role": "Art Director", "kind": "design", "difficulty": 1, "depends": [], "artifact": "assets/"},
         {"id": "integrate", "name": "통합 빌드", "role": "Build Engineer", "kind": "coding", "difficulty": 1, "depends": ["content", "save", "screens", "assets"], "artifact": "production-build.zip"},
-        {"id": "codereview", "name": "코드 리뷰", "role": "Technical Director", "kind": "debugging", "difficulty": 3, "critical": true, "depends": ["integrate"], "artifact": "code-review.md"}
+        {"id": "codereview", "name": "코드 리뷰", "role": "Technical Director", "kind": "debugging", "difficulty": 3, "critical": true, "depends": ["integrate"], "artifact": "code-review.md", "judge": true}
       ]
     },
     {
@@ -136,7 +136,7 @@
         {"id": "content", "name": "콘텐츠 완성", "role": "Game Designer", "kind": "planning", "difficulty": 1, "depends": [], "artifact": "content-final.json"},
         {"id": "compat", "name": "호환성·성능 검증", "role": "QA", "kind": "qa", "difficulty": 1, "depends": ["balance", "content"], "artifact": "compat-report.md"},
         {"id": "build", "name": "Beta 빌드", "role": "Build Engineer", "kind": "coding", "difficulty": 1, "depends": ["compat"], "artifact": "beta-build.zip"},
-        {"id": "rc", "name": "출시후보 리뷰", "role": "Game Director", "kind": "planning", "difficulty": 3, "critical": true, "depends": ["build"], "artifact": "rc-review.md"}
+        {"id": "rc", "name": "출시후보 리뷰", "role": "Game Director", "kind": "planning", "difficulty": 3, "critical": true, "depends": ["build"], "artifact": "rc-review.md", "judge": true}
       ]
     },
     {

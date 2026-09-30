@@ -35,6 +35,7 @@ class ExecuteRequest:
     model: str | None = None
     max_tokens: int = 2048
     temperature: float = 0.4
+    images: list[bytes] = field(default_factory=list)  # PNG screenshots for vision-capable models
 
 
 @dataclass

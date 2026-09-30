@@ -87,6 +87,9 @@ export function dashboard(app) {
     html +=
       '<section class="panel brief"><div class="panelHead"><div><div class="eyebrow">ACTIVE BRIEF</div><h2>' + esc(p.topic) + "</h2></div>" +
       '<div class="actions"><span class="chip">' + esc(p.platform) + '</span><span class="chip">' + esc(p.genre) + '</span><button class="btn small" data-action="new-topic">새 주제</button></div></div>' +
+      (state.user.mode !== "backend"
+        ? '<p class="notice">프리뷰 모드에는 AI가 연결되어 있지 않습니다. 공정·배정·커밋은 시뮬레이션이고 게임은 기본 템플릿 3종 중 하나로 만들어집니다. AI가 직접 아이디어를 내고 게임을 새로 만드는 것은 백엔드 + AI 연결에서 동작합니다.</p>'
+        : "") +
       '<p class="muted">' + state.ideas.filter((i) => i.projectId === p.id).length + "개 아이디어 · " +
       state.lines.filter((l) => l.projectId === p.id).length + "개 생산라인 · Backlog " + state.ideas.filter((i) => i.projectId === p.id && i.status === "backlog").length + "개</p></section>";
   }
@@ -139,8 +142,13 @@ export function ideas(app) {
     '<div class="ideaTop"><span class="rank">#' + i.rank + '</span><span class="score">' + i.score.toFixed(1) + "</span>" + pill(i.status) + "</div>" +
     "<h3>" + esc(i.title) + '</h3><p class="muted">' + esc(i.pitch) + "</p>" +
     '<p class="loop">' + i.loop.map(esc).join(" → ") + "</p>" +
+    (i.concept
+      ? '<div class="concept"><div class="chips">' + (i.concept.mechanics || []).map((m) => '<span class="chip">' + esc(m) + "</span>").join("") + "</div>" +
+        (i.concept.why_fun ? '<p class="muted small">재미 가설 · ' + esc(i.concept.why_fun) + "</p>" : "") +
+        '<small class="muted">발상 · ' + esc(i.concept.creator || "AI") + "</small></div>"
+      : "") +
     '<div class="metrics">' + criteria.map((c) => '<div><small>' + esc(c.label) + "</small>" + meter(i.metrics[c.id], { tone: i.metrics[c.id] >= 80 ? "good" : i.metrics[c.id] >= 65 ? "info" : "warn" }) + "<b>" + i.metrics[c.id] + "</b></div>").join("") + "</div>" +
-    '<ul class="reviews">' + i.reviews.map((r) => "<li><strong>" + esc(r.role) + "</strong> " + esc(r.verdict) + " (" + r.score + ") · " + esc(r.note) + "</li>").join("") + "</ul>" +
+    '<ul class="reviews">' + i.reviews.map((r) => "<li><strong>" + esc(r.role) + "</strong>" + (r.reviewer ? ' <span class="muted">(' + esc(r.reviewer) + ")</span>" : "") + " " + esc(r.verdict) + " (" + r.score + ") · " + esc(r.note) + "</li>").join("") + "</ul>" +
     (i.status === "backlog" || i.status === "candidate" ? '<button class="btn primary small" data-action="build-idea" data-id="' + esc(i.id) + '">이 아이디어 제작</button>' : "") +
     "</article>";
 

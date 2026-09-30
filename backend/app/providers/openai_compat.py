@@ -3,6 +3,8 @@ Hugging Face router, Cloudflare Workers AI, llama.cpp, Ollama and custom endpoin
 
 from __future__ import annotations
 
+import base64
+
 import httpx
 
 from .base import ExecuteRequest, ExecuteResult, ProviderAdapter, QuotaInfo, Usage, parse_reset
@@ -28,7 +30,12 @@ class OpenAICompatibleAdapter(ProviderAdapter):
         messages = []
         if request.system:
             messages.append({"role": "system", "content": request.system})
-        messages.append({"role": "user", "content": request.prompt})
+        if request.images:
+            parts = [{"type": "text", "text": request.prompt}]
+            parts += [{"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(img).decode()}} for img in request.images]
+            messages.append({"role": "user", "content": parts})
+        else:
+            messages.append({"role": "user", "content": request.prompt})
         model = request.model or self.model
         start = self._timer()
         res = self._request(

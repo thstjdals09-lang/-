@@ -20,7 +20,7 @@ from pathlib import Path
 from .. import catalog, db, routing, vault
 from ..connections import next_reset
 from ..providers import AdapterUnavailable, build_adapter
-from . import games, runtime_qa
+from . import ai_ideation, games, runtime_qa
 from .executor import SIM_ID, SIM_NAME, AllProvidersFailed, TaskContext, build_prompt, extract_game, qa_verdict, run_with_failover, simulate, to_file_content
 from .ideation import generate_ideas, slugify
 from .github_sync import GitHubSync, GitHubSyncError, RepoRef, repo_name
@@ -110,20 +110,24 @@ class Factory:
         s = self.user_settings(conn, user_id)
         project_id = _id("prj")
         conn.execute("INSERT INTO projects(id, user_id, topic, genre, platform, notes) VALUES (?,?,?,?,?,?)", (project_id, user_id, topic, genre, platform, notes))
-        ideas = generate_ideas(topic, genre, platform, self.studio)
+        ideas = ai_ideation.ideate(self, conn, user_id, topic=topic, genre=genre, platform=platform, notes=notes, studio=self.studio)
+        if ideas is None:
+            ideas = generate_ideas(topic, genre, platform, self.studio)
+            self.log(conn, user_id, "IDEATION", f"{topic} · 연결된 AI가 없어 오프라인 아이디어 패턴으로 생성 (AI 마켓에서 AI를 연결하면 AI가 직접 발상)")
         running = conn.execute("SELECT COUNT(*) FROM production_lines WHERE user_id=? AND status='running'", (user_id,)).fetchone()[0]
         n = min(s["auto_shortlist"], max(0, s["max_parallel"] - running), len(ideas))
         for idea in ideas:
             idea_id = _id("idea")
             status = "shortlisted" if idea["rank"] <= n else "backlog"
             conn.execute(
-                "INSERT INTO ideas(id, project_id, rank, title, type, family, pitch, loop, metrics, reviews, score, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO ideas(id, project_id, rank, title, type, family, pitch, loop, metrics, reviews, score, status, concept) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (idea_id, project_id, idea["rank"], idea["title"], idea["type"], idea["family"], idea["pitch"], json.dumps(idea["loop"], ensure_ascii=False),
-                 json.dumps(idea["metrics"]), json.dumps(idea["reviews"], ensure_ascii=False), idea["score"], status),
+                 json.dumps(idea["metrics"]), json.dumps(idea["reviews"], ensure_ascii=False), idea["score"], status,
+                 json.dumps(idea["concept"], ensure_ascii=False) if idea.get("concept") else None),
             )
             if status == "shortlisted":
                 self.create_line(conn, user_id, idea_id, automatic=True)
-        self.log(conn, user_id, "IDEATION", f"{topic} · 아이디어 {len(ideas)}개 · 상위 {n}개 자동 shortlist · {len(ideas) - n}개 Backlog")
+        self.log(conn, user_id, "SHORTLIST", f"{topic} · 아이디어 {len(ideas)}개 · 상위 {n}개 자동 생산라인 · {len(ideas) - n}개 Backlog")
         return project_id
 
     def create_line(self, conn, user_id, idea_id, *, automatic=False) -> str:
@@ -208,7 +212,8 @@ class Factory:
         if failed and attempts[-1].ok:
             chain = " → ".join(f"{a.name}({a.error_kind})" for a in failed)
             self.log(conn, user_id, "FAILOVER", f"{chain} → {attempts[-1].name} handoff", line_id)
-            self.message(conn, line_id, "handoff", failed[-1].name, attempts[-1].name, f"{failed[-1].error_kind} 발생으로 작업 인계", task_id)
+            if line_id:
+                self.message(conn, line_id, "handoff", failed[-1].name, attempts[-1].name, f"{failed[-1].error_kind} 발생으로 작업 인계", task_id)
 
     def execute(self, conn, user_id, line_id, task: dict, ctx: TaskContext, policy: str) -> tuple[str, str, str]:
         """Returns (text, connection_id, worker_name). Raises AllProvidersFailed when stuck."""
@@ -223,6 +228,7 @@ class Factory:
                 self.log(conn, user_id, "SUBSTITUTE", f"{task['name']} · {task['kind']} AI 없음 → {sub} 방식 대체", line_id)
                 task = {**task, "kind": sub}
                 ctx.kind = sub
+                ctx.images = []
                 rtask.kind = sub
                 decision = routing.route(rtask, [e for e, _, _ in team], policy=policy)
         by_id = {e.id: (row, entry) for e, row, entry in team}
@@ -288,6 +294,10 @@ class Factory:
         ).fetchall()
         feedback = [r["text"] for r in conn.execute("SELECT text FROM feedback WHERE line_id=? ORDER BY created_at", (line["id"],)).fetchall()]
         deps = [(r["path"], r["content"]) for r in deps]
+        if task["repair_of"]:
+            # the failed check's report and any review notes on the original work
+            deps += [(r["path"], r["content"]) for r in conn.execute(
+                "SELECT path, content FROM artifacts WHERE task_id=? ORDER BY id", (task["repair_of"],)).fetchall()]
         if task["task_key"].startswith("runtime-fix"):
             qa = conn.execute("SELECT path, content FROM artifacts WHERE line_id=? AND path LIKE 'qa/runtime-%' ORDER BY id DESC LIMIT 1", (line["id"],)).fetchone()
             if qa:
@@ -297,14 +307,54 @@ class Factory:
             loop=json.loads(idea["loop"]), platform=idea["platform"] or "Web", stage_name=stage_def["name"], stage_summary=stage_def.get("summary", ""),
             task_name=task["name"], role=task["role"], kind=task["kind"], artifact=task["artifact"] or "notes.md",
             dependencies={path: content or "" for path, content in deps}, feedback=feedback,
+            judge=self._is_judge(stage_def, task), concept=json.loads(idea["concept"]) if idea["concept"] else None,
+            dossier=self._dossier(conn, line, stage_def),
         )
+
+    DOSSIER_PRIORITY = ("GDD.md", "core-loop.md", "economy.md", "architecture.md", "ux-flow.md", "art-bible.md", "production-backlog.json",
+                        "greenlight-report.md", "fun-review.md", "prototype-findings.md", "quality-bar.md", "visual-review.md", "code-review.md",
+                        "balance-report.md", "rc-review.md")
+    DOSSIER_LIMIT = 14000
+
+    def _dossier(self, conn, line, stage_def) -> dict[str, str]:
+        """Latest artifact per path from earlier stages, key design documents first, size-capped."""
+        rows = conn.execute(
+            """SELECT path, content, stage_key FROM artifacts WHERE line_id=? AND stage_key!=? AND content IS NOT NULL
+               AND path NOT LIKE 'builds/%' AND path NOT LIKE 'release/%' AND path NOT LIKE 'game/%' AND path NOT LIKE 'qa/runtime-%'
+               ORDER BY id DESC""",
+            (line["id"], stage_def["id"]),
+        ).fetchall()
+        latest: dict[str, str] = {}
+        for r in rows:
+            if r["path"].endswith((".md", ".json")) and r["path"] not in latest:
+                latest[r["path"]] = r["content"]
+        rank = {name: i for i, name in enumerate(self.DOSSIER_PRIORITY)}
+        ordered = sorted(latest, key=lambda p: rank.get(p.rsplit("/", 1)[-1], len(rank)))
+        out, used = {}, 0
+        for path in ordered:
+            budget = 2400 if path.rsplit("/", 1)[-1] in rank else 900
+            body = latest[path][:budget]
+            if used + len(body) > self.DOSSIER_LIMIT:
+                break
+            out[path] = body
+            used += len(body)
+        return out
+
+    def _is_judge(self, stage_def, task) -> bool:
+        return not task["repair_of"] and any(t["id"] == task["task_key"] and t.get("judge") for t in stage_def["tasks"])
 
     def _spawn_repair(self, conn, stage_row, task):
         n = conn.execute("SELECT COUNT(*) FROM tasks WHERE stage_id=? AND repair_of=?", (stage_row["id"], task["id"])).fetchone()[0] // 2 + 1
         fix_id, retest_id = _id("tsk"), _id("tsk")
+        stage_index = next(i for i, s in enumerate(self.stages) if s["id"] == stage_row["stage_key"])
+        prototype_index = next(i for i, s in enumerate(self.stages) if s["id"] == "prototype")
+        if stage_index < prototype_index:
+            fix = ("기획 수정", "Game Designer", "planning", f"revisions/{task['task_key']}-{n}.md")
+        else:
+            fix = ("자동 수정", "Gameplay Programmer", "debugging", f"fix-{task['task_key']}.patch")
         conn.execute(
             "INSERT INTO tasks(id, line_id, stage_id, task_key, name, role, kind, difficulty, critical, artifact, status, repair_of) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            (fix_id, task["line_id"], stage_row["id"], f"{task['task_key']}-fix{n}", f"자동 수정: {task['name']}", "Gameplay Programmer", "debugging", 2, 0, f"fix-{task['task_key']}.patch", "ready", task["id"]),
+            (fix_id, task["line_id"], stage_row["id"], f"{task['task_key']}-fix{n}", f"{fix[0]}: {task['name']}", fix[1], fix[2], 2, 0, fix[3], "ready", task["id"]),
         )
         conn.execute(
             "INSERT INTO tasks(id, line_id, stage_id, task_key, name, role, kind, difficulty, critical, artifact, status, repair_of) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -336,8 +386,16 @@ class Factory:
         try:
             ctx = self._context(conn, line, stage_def, task)
             game_task = self._is_game_task(stage_def, task)
+            ws = self.workspace(user_id, line["id"])
             if game_task:
-                ctx.game_source = self.current_game(self.workspace(user_id, line["id"]), line)
+                ctx.game_task = True
+                existing = ws.read(GAME_PATH)
+                ctx.game_source = existing if existing and games.smoke_test(existing)["passed"] else None
+            if task["kind"] == "vision":
+                shot = runtime_qa.run(self.current_game(ws, line))
+                if shot["screenshot"]:
+                    ctx.images = [shot["screenshot"]]
+                ctx.dossier["qa/runtime-now.json"] = json.dumps({"status": shot["status"], "checks": shot["checks"], "errors": shot["errors"]}, ensure_ascii=False)
             conn.execute("UPDATE tasks SET status='in_progress', attempts=attempts+1, started_at=? WHERE id=?", (_iso(), task["id"]))
             try:
                 text, connection_id, worker = self.execute(conn, user_id, line["id"], dict(task), ctx, policy)
@@ -346,12 +404,13 @@ class Factory:
             reviewer, reviewer_conn = None, None
             if task["kind"] == "coding":
                 path, body = to_file_content(task["artifact"] or "notes.md", text)
-                review_ctx = TaskContext(**{**ctx.__dict__, "task_name": f"diff 리뷰: {task['name']}", "role": "Technical Director", "kind": "qa",
-                                             "artifact": "review.md", "dependencies": {path: body}, "game_source": None})
+                review_ctx = TaskContext(**{**ctx.__dict__, "task_name": f"코드 리뷰: {task['name']}", "role": "Technical Director", "kind": "qa",
+                                             "artifact": "review.md", "dependencies": {path: body}, "game_source": None, "game_task": False,
+                                             "judge": False, "images": []})
                 review_task = {**dict(task), "kind": "debugging", "difficulty": 2, "critical": 0}
-                _, reviewer_conn, reviewer = self.execute(conn, user_id, line["id"], review_task, review_ctx, policy)
+                review_text, reviewer_conn, reviewer = self.execute(conn, user_id, line["id"], review_task, review_ctx, policy)
             return {"blocked": False, "ctx": ctx, "game_task": game_task, "text": text, "connection_id": connection_id,
-                    "worker": worker, "reviewer": reviewer, "reviewer_conn": reviewer_conn}
+                    "worker": worker, "reviewer": reviewer, "reviewer_conn": reviewer_conn, "review_text": review_text if task["kind"] == "coding" else None}
         finally:
             conn.close()
 
@@ -374,7 +433,8 @@ class Factory:
                 if generated:
                     self.log(conn, user_id, "GAME REJECTED", f"{line['title']} · {worker} 결과가 정적 검증 실패 → 이전 게임 유지", line["id"])
                 if ws.read(GAME_PATH) is None:
-                    files[GAME_PATH] = res["ctx"].game_source  # seed main with a playable game
+                    files[GAME_PATH] = self._template_game(line)  # emergency fallback so main stays playable
+                    self.log(conn, user_id, "TEMPLATE FALLBACK", f"{line['title']} · AI가 만든 게임이 없어 비상용 템플릿으로 main을 채움", line["id"])
         if task["artifact"] == "release/index.html":
             files[path] = self.current_game(ws, line)
             files["release/NOTES.md"] = text
@@ -387,7 +447,18 @@ class Factory:
         branch = ws.branch_name(line["project_slug"], line["slug"], worker, stage_def["id"], task["task_key"])
         conn.commit()  # never hold the SQLite write lock across git work
         commit = ws.commit_task(branch=branch, files=files, message=f"{stage_def['id']}: {task['name']}", author=worker)
-        verdict = qa_verdict(text) if task["kind"] in ("qa", "vision") and not task["repair_of"] else ("passed" if task["kind"] in ("qa", "vision") else ("tests_passed" if task["kind"] == "coding" else None))
+        judge = self._is_judge(stage_def, task)
+        if (task["kind"] in ("qa", "vision") or judge) and not task["repair_of"]:
+            verdict = qa_verdict(text)
+        elif task["kind"] in ("qa", "vision") or judge:
+            verdict = "passed"
+        else:
+            verdict = "tests_passed" if task["kind"] == "coding" else None
+        review_failed = False
+        if res.get("review_text") is not None:
+            review_failed = qa_verdict(res["review_text"]) == "failed" and not task["repair_of"]
+            if review_failed:
+                verdict = "changes_requested"
         reviewer_conn = res["reviewer_conn"]
         conn.execute(
             """UPDATE tasks SET status='completed', connection_id=?, worker_name=?, reviewer_connection_id=?, reviewer_name=?,
@@ -396,10 +467,18 @@ class Factory:
              branch, commit.sha, verdict, _iso(), task["id"]),
         )
         conn.execute("INSERT INTO artifacts(line_id, task_id, stage_key, path, content) VALUES (?,?,?,?,?)", (line["id"], task["id"], stage_def["id"], path, files[path][:200_000]))
+        if res.get("review_text") is not None:
+            conn.execute("INSERT INTO artifacts(line_id, task_id, stage_key, path, content) VALUES (?,?,?,?,?)",
+                         (line["id"], task["id"], stage_def["id"], f"reviews/{stage_def['id']}-{task['task_key']}.md", res["review_text"][:20_000]))
         self.log(conn, user_id, "COMMIT", f"{line['title']} · {commit.sha[:7]} {branch} → main" + (f" (reviewed by {reviewer})" if reviewer else ""), line["id"])
         self.message(conn, line["id"], "result", worker, "Leader", f"{task['name']} 완료 · {path}", task["id"])
         if verdict == "failed":
-            self.log(conn, user_id, "QA FAIL", f"{line['title']} · {task['name']} 실패 → 자동 수정 루프", line["id"])
+            label = "JUDGE FAIL" if judge else "QA FAIL"
+            self.log(conn, user_id, label, f"{line['title']} · {task['name']} 불합격 → 지적사항으로 수정 작업 생성", line["id"])
+            self._spawn_repair(conn, stage_row, task)
+        elif review_failed:
+            self.log(conn, user_id, "REVIEW REJECT", f"{line['title']} · {reviewer}가 {task['name']} 변경 요청 → 리뷰 반영 수정 작업 생성", line["id"])
+            self.message(conn, line["id"], "review_request", reviewer, worker, "변경 요청: " + res["review_text"][-200:], task["id"])
             self._spawn_repair(conn, stage_row, task)
 
     def _complete_stage(self, conn, user_id, line, stage_def, stage_row):

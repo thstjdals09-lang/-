@@ -3,6 +3,8 @@ never in the URL, so it cannot leak through access logs."""
 
 from __future__ import annotations
 
+import base64
+
 from .base import ExecuteRequest, ExecuteResult, ProviderAdapter, Usage
 
 
@@ -22,7 +24,8 @@ class GeminiAdapter(ProviderAdapter):
     def execute(self, request: ExecuteRequest) -> ExecuteResult:
         model = request.model or self.model or "gemini-2.5-flash"
         body: dict = {
-            "contents": [{"role": "user", "parts": [{"text": request.prompt}]}],
+            "contents": [{"role": "user", "parts": [{"text": request.prompt}] + [
+                {"inline_data": {"mime_type": "image/png", "data": base64.b64encode(img).decode()}} for img in request.images]}],
             "generationConfig": {"maxOutputTokens": request.max_tokens, "temperature": request.temperature},
         }
         if request.system:

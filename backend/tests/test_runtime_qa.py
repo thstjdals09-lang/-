@@ -69,3 +69,18 @@ def test_failed_runtime_gate_repairs_then_reverts_to_safe_game(runtime_on, signe
     shot = signed_in.get(f"/builds/{build['id']}/screenshot.png")
     assert shot.status_code == 200 and shot.content.startswith(b"\x89PNG")
     assert "CRASH" not in signed_in.get(f"/builds/{build['id']}/play").text
+
+
+def test_vision_qa_receives_the_runtime_screenshot(runtime_on, signed_in, http):
+    from .test_collaboration import _setup
+
+    studio = _setup(signed_in, http)
+    signed_in.post("/projects", json={"topic": "좀비"}, headers=CSRF)
+    line_id = signed_in.get("/lines").json()[0]["id"]
+    for _ in range(80):
+        signed_in.post(f"/lines/{line_id}/tick", headers=CSRF)
+        tasks = signed_in.get(f"/lines/{line_id}").json()["stages"].get("vertical", {}).get("tasks", [])
+        if any(t["id"] == "visualqa" and t["status"] == "completed" for t in tasks):
+            break
+    assert studio.images >= 1
+    assert any("qa/runtime-now.json" in p for p in studio.prompts if "비전 기반 화면 QA" in p)

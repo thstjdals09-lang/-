@@ -331,3 +331,5 @@ label.reserve { grid-template-columns: auto 1fr; align-items: center; }
 .deploy.live { border-color: #1f5a39; background: #0b1a12; }
 .deploy strong { font-size: 13px; }
 .deploy .url { overflow-wrap: anywhere; color: #9ee8bb; }
+.concept { display: grid; gap: 4px; }
+.concept .chips { margin: 0; }

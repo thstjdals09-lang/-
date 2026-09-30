@@ -30,7 +30,12 @@ class TaskContext:
     artifact: str
     dependencies: dict[str, str] = field(default_factory=dict)
     feedback: list[str] = field(default_factory=list)
-    game_source: str | None = None  # set for tasks that must return the updated game
+    game_source: str | None = None  # current game on main (None: nothing playable yet)
+    game_task: bool = False  # the task must return the complete game
+    judge: bool = False  # the task decides PASS/FAIL for its stage
+    concept: dict | None = None  # AI ideation output: mechanics, fun hypothesis, scope
+    dossier: dict[str, str] = field(default_factory=dict)  # artifacts from earlier stages
+    images: list[bytes] = field(default_factory=list)
 
 
 GAME_RULES = (
@@ -51,20 +56,37 @@ def build_prompt(ctx: TaskContext) -> ExecuteRequest:
     deps = "\n\n".join(f"### {name}\n{body[:1500]}" for name, body in ctx.dependencies.items()) or "(none)"
     feedback = "\n".join(f"- {f}" for f in ctx.feedback) or "(none)"
     qa_rule = ""
-    if ctx.kind in ("qa", "vision"):
-        qa_rule = "\nEnd with a final line exactly `RESULT: PASS` or `RESULT: FAIL` followed by the blocking issues."
+    if ctx.kind in ("qa", "vision") or ctx.judge:
+        qa_rule = ("\nYou are a gate. Judge strictly against the design dossier and the concept. End with a final line exactly "
+                   "`RESULT: PASS` or `RESULT: FAIL` followed by the blocking issues (concrete, actionable).")
+    concept = ""
+    if ctx.concept:
+        concept = ("# Concept (from the ideation room)\n"
+                   f"Mechanics: {'; '.join(ctx.concept.get('mechanics') or [])}\nWhy it is fun: {ctx.concept.get('why_fun', '')}\n"
+                   f"First playable scope: {ctx.concept.get('scope', '')}\n\n")
+    dossier = ""
+    if ctx.dossier:
+        dossier = "# Design dossier (decisions from earlier stages — follow them)\n" + "\n\n".join(
+            f"### {name}\n{body}" for name, body in ctx.dossier.items()) + "\n\n"
     prompt = (
         f"# Game\n{ctx.line_title} ({ctx.game_type}, family {ctx.family}, platform {ctx.platform})\n"
         f"Pitch: {ctx.pitch}\nCore loop: {' → '.join(ctx.loop)}\n\n"
+        f"{concept}{dossier}"
         f"# Stage\n{ctx.stage_name}: {ctx.stage_summary}\n\n"
         f"# Your task\n{ctx.task_name} → produce `{ctx.artifact}`{qa_rule}\n\n"
         f"# Inputs from completed dependencies\n{deps}\n\n# CEO feedback to honour\n{feedback}\n"
     )
     max_tokens = 3000 if ctx.kind in ("coding", "debugging") else 1600
-    if ctx.game_source is not None:
-        prompt += f"\n# Game deliverable\n{GAME_RULES}\n\n# Current game source\n```html\n{ctx.game_source[:60000]}\n```\n"
+    if ctx.game_task:
+        prompt += f"\n# Game deliverable\n{GAME_RULES}\n"
+        if ctx.game_source:
+            prompt += f"\n# Current game source (improve it; keep what works)\n```html\n{ctx.game_source[:60000]}\n```\n"
+        else:
+            prompt += ("\nNo game exists yet. Write it from scratch so it implements THIS concept and the design dossier: "
+                       "its own mechanics, rules, controls, visuals and win/lose conditions. Do not fall back to a generic "
+                       "collect-and-dodge, pick-a-card or click-to-earn template.\n")
         max_tokens = 12000
-    return ExecuteRequest(prompt=prompt, system=system, max_tokens=max_tokens)
+    return ExecuteRequest(prompt=prompt, system=system, max_tokens=max_tokens, images=list(ctx.images))
 
 
 _HTML_BLOCK = re.compile(r"```html\s*\n(.*?)```", re.S | re.I)
