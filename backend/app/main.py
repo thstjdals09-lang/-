@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import auth, catalog, config, connections, vault
 from .auth import User, csrf_guard, current_user
+from .factory import api as factory_api
 from .domain import (
     AIEmployee,
     AIEmployeeCreate,
@@ -113,6 +114,7 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
     application.include_router(core)
     application.include_router(auth.router)
     application.include_router(connections.router)
+    application.include_router(factory_api.router)
     return application
 
 

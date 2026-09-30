@@ -1,0 +1,128 @@
+"""Git workspace for a production line (P3).
+
+Each line owns a repository whose `main` stays runnable. Every task runs in its own worktree on
+`ai-factory/<project>/<line>/<agent>/<stage>-<task>`, commits there, is reviewed, then merged into
+main with --no-ff, after which the worktree and branch are removed.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import re
+import shutil
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
+
+from .ideation import slugify
+
+GIT_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_NOSYSTEM": "1"}
+
+
+class WorkspaceError(RuntimeError):
+    pass
+
+
+def _safe_relpath(path: str) -> Path:
+    """Artifact paths come from model output: allow only plain relative paths inside the tree.
+    (On Windows, Path('/x').is_absolute() is False, so anchors and drives are checked explicitly.)"""
+    norm = str(path).replace("\\", "/")
+    rel = PurePosixPath(norm)
+    if not norm or norm.startswith("/") or re.match(r"^[A-Za-z]:", norm) or ".." in rel.parts or rel.parts[0] == ".git":
+        raise WorkspaceError(f"unsafe artifact path: {path}")
+    return Path(*rel.parts)
+
+
+def _inside(root: Path, rel: str) -> Path:
+    target = root / _safe_relpath(rel)
+    if not target.resolve().is_relative_to(root.resolve()):
+        raise WorkspaceError(f"unsafe artifact path: {rel}")
+    return target
+
+
+@dataclass
+class TaskCommit:
+    branch: str
+    sha: str
+    merged_sha: str
+
+
+class LineWorkspace:
+    def __init__(self, root: Path):
+        self.root = Path(root)
+        self.repo = self.root / "repo"
+        self.trees = self.root / "wt"
+
+    def _git(self, *args: str, cwd: Path | None = None, author: str = "AI Factory") -> str:
+        env = {**os.environ, **GIT_ENV}
+        cmd = ["git", "-c", f"user.name={author}", "-c", "user.email=ai-factory@localhost", "-c", "core.autocrlf=false", "-c", "core.longpaths=true", *args]
+        res = subprocess.run(cmd, cwd=cwd or self.repo, env=env, capture_output=True, text=True, encoding="utf-8")
+        if res.returncode != 0:
+            raise WorkspaceError(f"git {' '.join(args[:2])} failed: {res.stderr.strip()[:300]}")
+        return res.stdout.strip()
+
+    def ensure(self, title: str) -> None:
+        if (self.repo / ".git").exists():
+            return
+        self.repo.mkdir(parents=True, exist_ok=True)
+        self._git("init", "-q", "-b", "main")
+        (self.repo / "README.md").write_text(f"# {title}\n\nProduced by AI Factory.\n", encoding="utf-8")
+        (self.repo / ".gitignore").write_text(".env\n*.key\nnode_modules/\n", encoding="utf-8")
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", "chore: initialize production line")
+
+    @staticmethod
+    def branch_name(project: str, line: str, agent: str, stage: str, task: str) -> str:
+        parts = [slugify(project), slugify(line), slugify(agent), f"{slugify(stage)}-{slugify(task)}"]
+        return "ai-factory/" + "/".join(parts)
+
+    def commit_task(self, *, branch: str, files: dict[str, str], message: str, author: str) -> TaskCommit:
+        """Worktree → write → commit → merge into main → cleanup. Returns the task commit."""
+        if not files:
+            raise WorkspaceError("task produced no files")
+        # Short directory names keep Windows paths (and git's worktree admin dir) under MAX_PATH.
+        tree = self.trees / hashlib.sha1(branch.encode()).hexdigest()[:10]
+        if tree.exists():
+            shutil.rmtree(tree, ignore_errors=True)
+            self._git("worktree", "prune")
+        self.trees.mkdir(parents=True, exist_ok=True)
+        if self._git("branch", "--list", branch):
+            self._git("branch", "-D", branch)
+        self._git("worktree", "add", "-q", "-b", branch, str(tree), "main")
+        try:
+            for rel, content in files.items():
+                target = _inside(tree, rel)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(content, encoding="utf-8")
+            self._git("add", "-A", cwd=tree)
+            if not self._git("status", "--porcelain", cwd=tree):
+                (tree / ".ai-factory-touch").write_text(branch, encoding="utf-8")
+                self._git("add", "-A", cwd=tree)
+            self._git("commit", "-q", "-m", message, cwd=tree, author=author)
+            sha = self._git("rev-parse", "HEAD", cwd=tree)
+            self._git("merge", "-q", "--no-ff", "-X", "theirs", "-m", f"merge {branch}", branch, author="AI Factory Leader")
+            merged = self._git("rev-parse", "HEAD")
+        finally:
+            self._git("worktree", "remove", "--force", str(tree))
+        self._git("branch", "-D", branch)
+        return TaskCommit(branch=branch, sha=sha, merged_sha=merged)
+
+    def commit_on_main(self, files: dict[str, str], message: str, author: str) -> str:
+        for rel, content in files.items():
+            target = _inside(self.repo, rel)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+        self._git("add", "-A")
+        self._git("commit", "-q", "--allow-empty", "-m", message, author=author)
+        return self._git("rev-parse", "HEAD")
+
+    def read(self, rel: str) -> str | None:
+        path = self.repo / _safe_relpath(rel)
+        return path.read_text(encoding="utf-8") if path.is_file() else None
+
+    def log(self, limit: int = 20) -> list[str]:
+        return self._git("log", f"-{limit}", "--format=%h %s").splitlines()
+
+    def worktrees(self) -> list[str]:
+        return [l for l in self._git("worktree", "list", "--porcelain").splitlines() if l.startswith("worktree ")]

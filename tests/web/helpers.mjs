@@ -1,7 +1,10 @@
 import { readFileSync } from "node:fs";
 import { createRng } from "../../docs/js/engine.js";
+import { FAMILIES, setGameTemplates } from "../../docs/js/games.js";
 
 const read = (name) => JSON.parse(readFileSync(new URL("../../docs/catalog/" + name, import.meta.url), "utf8"));
+
+setGameTemplates(Object.fromEntries(FAMILIES.map((f) => [f, readFileSync(new URL("../../docs/catalog/games/" + f + ".html", import.meta.url), "utf8")])));
 
 export const studio = read("studio.json");
 export const providers = read("providers.json").providers;

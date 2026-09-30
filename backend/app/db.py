@@ -261,6 +261,11 @@ MIGRATIONS: list[str] = [
     CREATE INDEX idx_logs_user ON factory_logs(user_id, id);
     CREATE INDEX idx_messages_line ON messages(line_id, id);
     """,
+    # 4 — worker/reviewer display names (simulated workers have no connection row).
+    """
+    ALTER TABLE tasks ADD COLUMN worker_name TEXT;
+    ALTER TABLE tasks ADD COLUMN reviewer_name TEXT;
+    """,
 ]
 
 

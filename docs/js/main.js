@@ -4,7 +4,7 @@ import {
   STATE_VERSION, createState, createProject, tickFactory, tickLine, fastForward, startBacklogIdea, addFeedback,
   approveReview, requestRevision, setLineStatus, employeeFromCatalog, addLog, slugify,
 } from "./engine.js";
-import { buildGame } from "./games.js";
+import { buildGame, loadGameTemplates } from "./games.js";
 import { gddMarkdown, qaMarkdown } from "./artifacts.js";
 import { esc, download } from "./ui.js";
 import { createApi, probeLocalEndpoint } from "./api.js";
@@ -432,6 +432,7 @@ async function boot() {
   const [providers, studio] = await Promise.all([
     fetch("./catalog/providers.json").then((r) => r.json()),
     fetch("./catalog/studio.json").then((r) => r.json()),
+    loadGameTemplates(),
   ]);
   catalog = { providers: providers.providers, updated: providers.catalog_updated, studio };
   app.ctx = makeCtx();
