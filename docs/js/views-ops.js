@@ -1,6 +1,6 @@
 // CEO Review, completed results, logs, settings and login views.
 
-import { esc, fmtTime, pill, empty } from "./ui.js";
+import { esc, fmtTime, pill, empty, publicationBlock } from "./ui.js";
 import { POLICIES } from "./router.js";
 
 export function review(app) {
@@ -36,21 +36,26 @@ export function review(app) {
 
 export function results(app) {
   const { state } = app;
+  const mode = state.user.mode;
   const lines = state.lines.filter((l) => l.builds.length);
   if (!lines.length) return empty("아직 플레이 가능한 빌드가 없습니다. Prototype 단계 완료 시 첫 빌드가 생성됩니다.");
+  const live = lines.filter((l) => l.publication && l.publication.status === "live");
   return (
-    '<p class="notice">빌드는 이 브라우저에서 sandbox iframe으로 실행되며 HTML 파일로 내려받을 수 있습니다. GitHub 저장소·Pages 링크는 백엔드 Publisher가 실제로 게시했을 때만 표시됩니다.</p>' +
+    (mode === "backend"
+      ? '<section class="panel"><div class="panelHead"><div><div class="eyebrow">DEPLOYED GAMES</div><h2>배포 링크 ' + live.length + "</h2></div></div>" +
+        (live.length
+          ? '<ul class="plainList">' + live.map((l) => '<li><div><strong>' + esc(l.title) + '</strong><small>v' + esc(l.publication.version || "") + " · " + (l.publication.kind === "release" ? "정식 릴리즈" : "플레이 빌드") + '</small></div><a class="btn small primary" href="' + esc(l.publication.pagesUrl) + '" target="_blank" rel="noopener">플레이 ↗</a><a class="btn small" href="' + esc(l.publication.repositoryUrl) + '" target="_blank" rel="noopener">저장소 ↗</a></li>').join("") + "</ul>"
+          : '<p class="muted">접속 확인이 끝난 배포 링크가 여기에 모입니다.</p>') +
+        "</section>"
+      : '<p class="notice">프리뷰 모드: 빌드는 이 브라우저에서 sandbox iframe으로 실행·다운로드할 수 있습니다. GitHub 저장소 생성과 배포 링크는 백엔드 모드에서 만들어집니다.</p>') +
     '<div class="resultGrid">' +
     lines.map((l) => {
       const b = l.builds[0];
-      const pub = l.publication;
       return (
         '<article class="panel result"><div class="cover ' + esc(l.family) + '"><span>' + esc(l.family.toUpperCase()) + " · v" + esc(b.version) + "</span><strong>" + esc(l.title) + "</strong></div>" +
         '<div class="panelHead"><div><div class="eyebrow">' + esc(l.topic) + "</div><h2>" + esc(l.gameType) + "</h2></div>" + pill(l.status) + "</div>" +
         '<div class="actions wrap"><button class="btn primary" data-action="play" data-id="' + esc(l.id) + '">실행</button><button class="btn" data-action="download-build" data-id="' + esc(l.id) + '">HTML 다운로드</button><button class="btn" data-action="gdd" data-id="' + esc(l.id) + '">GDD</button><button class="btn" data-action="download-qa" data-id="' + esc(l.id) + '">QA 리포트</button></div>' +
-        (pub && pub.status === "published"
-          ? '<div class="actions"><a class="btn" href="' + esc(pub.repositoryUrl) + '" target="_blank" rel="noopener">GitHub 저장소 ↗</a><a class="btn primary" href="' + esc(pub.pagesUrl) + '" target="_blank" rel="noopener">GitHub Pages ↗</a></div>'
-          : '<p class="muted small">GitHub 게시: 백엔드 Publisher 미연결</p>') +
+        publicationBlock(l, mode) +
         "</article>"
       );
     }).join("") +

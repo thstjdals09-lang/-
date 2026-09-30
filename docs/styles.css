@@ -325,3 +325,9 @@ label.reserve { grid-template-columns: auto 1fr; align-items: center; }
   .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ideaGrid, .employeeGrid, .marketGrid, .resultGrid { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ---------- deployment ---------- */
+.deploy { display: grid; gap: 6px; margin: 10px 0; padding: 12px; border: 1px solid #1f2b39; border-radius: 10px; background: #0b1119; }
+.deploy.live { border-color: #1f5a39; background: #0b1a12; }
+.deploy strong { font-size: 13px; }
+.deploy .url { overflow-wrap: anywhere; color: #9ee8bb; }

@@ -1,6 +1,6 @@
 // Dashboard (factory floor), idea portfolio and production-line views.
 
-import { esc, fmtTime, fmtNum, pill, meter, empty, LABEL } from "./ui.js";
+import { esc, fmtTime, fmtNum, pill, meter, empty, LABEL, publicationBlock } from "./ui.js";
 import { lineProgress, activeWorkers } from "./engine.js";
 import { remainingRatio, atReserve } from "./router.js";
 
@@ -279,7 +279,8 @@ function lineDetail(line, app) {
     '<ul class="inbox">' + line.messages.slice(0, 14).map((m) => '<li><span class="msgType">' + esc(m.type) + "</span><div><strong>" + esc(m.from) + " → " + esc(m.to) + "</strong><p>" + esc(m.text) + "</p></div><small>" + esc(fmtTime(m.time)) + "</small></li>").join("") + "</ul>" +
     "</section></div>" +
     '<div class="twoCol">' +
-    '<section class="panel"><div class="panelHead"><div><div class="eyebrow">ARTIFACTS · BUILDS</div><h2>산출물</h2></div></div>' +
+    '<section class="panel"><div class="panelHead"><div><div class="eyebrow">ARTIFACTS · BUILDS · DEPLOY</div><h2>산출물 · 배포</h2></div></div>' +
+    publicationBlock(line, state.user.mode) +
     (line.builds.length ? '<ul class="plainList">' + line.builds.map((b) => "<li><div><strong>v" + esc(b.version) + " · " + esc(b.stageId) + "</strong><small>" + esc(fmtTime(b.createdAt)) + (b.bytes ? " · " + fmtNum(b.bytes) + " bytes" : "") + (b.commit ? " · " + esc(String(b.commit).slice(0, 7)) : "") + "</small></div>" + pill(b.smoke.passed ? "passed" : "failed", "smoke") + '<button class="btn small" data-action="play" data-id="' + esc(line.id) + '">실행</button><button class="btn small" data-action="download-build" data-id="' + esc(line.id) + '">다운로드</button></li>').join("") + "</ul>" : "") +
     '<div class="artifactGroups">' + Object.entries(byStage).map(([sid, names]) => "<div><small>" + esc(sid) + "</small>" + names.map((n) => "<code>" + esc(n) + "</code>").join("") + "</div>").join("") + "</div>" +
     "</section>" +

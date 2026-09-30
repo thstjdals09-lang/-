@@ -284,6 +284,11 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX idx_publications_line ON publications(line_id, created_at);
     """,
+    # 6 — deployed build version per publication; AI-authored concept details per idea.
+    """
+    ALTER TABLE publications ADD COLUMN version TEXT;
+    ALTER TABLE ideas ADD COLUMN concept TEXT;
+    """,
 ]
 
 

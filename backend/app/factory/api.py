@@ -47,7 +47,8 @@ def get_factory(app) -> Factory:
     if getattr(app.state, "factory", None) is None:
         s = app.state.settings
         app.state.factory = Factory(s.catalog_dir, s.workspace_dir, simulate=s.simulate_without_providers, transport=getattr(app.state, "http_transport", None),
-                                    github=getattr(app.state, "github_sync", None) or GitHubSync.from_environment())
+                                    github=getattr(app.state, "github_sync", None) or GitHubSync.from_environment(),
+                                    verifier=getattr(app.state, "pages_verifier", None))
     return app.state.factory
 
 
@@ -117,12 +118,15 @@ def line_detail(f: Factory, conn, line) -> dict:
     ]
     feedback = [dict(r) for r in conn.execute("SELECT id, text, stage_key, status, created_at FROM feedback WHERE line_id=? ORDER BY created_at DESC", (line["id"],))]
     artifacts = [{"name": a["path"], "stageId": a["stage_key"]} for a in conn.execute("SELECT path, stage_key FROM artifacts WHERE line_id=? ORDER BY id", (line["id"],))]
-    pub = conn.execute(
-        "SELECT * FROM publications WHERE line_id=? ORDER BY (kind='pages' AND status='published') DESC, created_at DESC, rowid DESC LIMIT 1", (line["id"],)
-    ).fetchone()
-    publication = {"kind": pub["kind"], "status": pub["status"], "repositoryUrl": pub["repository_url"], "pagesUrl": pub["pages_url"],
-                   "commit": pub["commit_sha"], "detail": pub["detail"], "time": pub["created_at"]} if pub else None
-    return {**line_summary(f, conn, line), "publication": publication, "stages": stages, "commits": commits, "builds": builds, "messages": messages, "feedback": feedback, "artifacts": artifacts}
+    pubs = conn.execute("SELECT * FROM publications WHERE line_id=? ORDER BY created_at DESC, rowid DESC", (line["id"],)).fetchall()
+    as_dict = lambda p: {"kind": p["kind"], "status": p["status"], "version": p["version"], "repositoryUrl": p["repository_url"], "pagesUrl": p["pages_url"],
+                         "commit": p["commit_sha"], "detail": p["detail"], "time": p["created_at"]}
+    deployments = [as_dict(p) for p in pubs if p["kind"] in ("pages", "release")]
+    live = next((d for d in deployments if d["status"] == "live"), None)
+    publication = live or (deployments[0] if deployments else (as_dict(pubs[0]) if pubs else None))
+    if publication and live and deployments and deployments[0] is not live:
+        publication = {**live, "next": deployments[0]}  # newer build still deploying/failed
+    return {**line_summary(f, conn, line), "publication": publication, "deployments": deployments[:10], "stages": stages, "commits": commits, "builds": builds, "messages": messages, "feedback": feedback, "artifacts": artifacts}
 
 
 # ---------------------------------------------------------------- settings / dashboard

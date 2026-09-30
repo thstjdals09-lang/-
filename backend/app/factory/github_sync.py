@@ -88,3 +88,15 @@ class GitHubSync:
                 raise GitHubSyncError(f"pages enable failed: {exc}") from exc
             pages = self._client.request("GET", f"{base}/pages")
         return str(pages.get("html_url") or f"https://{ref.owner}.github.io/{ref.repo}/")
+
+    def pages_status(self, ref: RepoRef) -> dict:
+        """Latest Pages build: {'status': built|building|queued|errored, 'commit': sha}."""
+        base = f"/repos/{quote(ref.owner)}/{quote(ref.repo)}"
+        try:
+            build = self._client.request("GET", f"{base}/pages/builds/latest")
+        except GitHubAPIError as exc:
+            if exc.status == 404:
+                return {"status": "queued"}
+            raise GitHubSyncError(f"pages status failed: {exc}") from exc
+        error = (build.get("error") or {}).get("message")
+        return {"status": build.get("status"), "commit": build.get("commit"), "error": error}

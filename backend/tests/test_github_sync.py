@@ -19,6 +19,8 @@ class FakeGitHub:
         self.calls.append((method, path))
         if path == "/user":
             return {"login": "ceo"}
+        if method == "GET" and path.endswith("/pages/builds/latest"):
+            return {"status": "built", "commit": None}
         if method == "POST" and path == "/user/repos":
             if payload["name"] in self.repos:
                 raise GitHubAPIError(422, "exists")
@@ -38,10 +40,17 @@ def remote(tmp_path):
     return bare
 
 
+def verifier_for(sync, status_code=200):
+    from app.factory.pages_verifier import PagesVerifier
+
+    return PagesVerifier(sync, interval=0, timeout=0.2, background=False, probe=lambda url: status_code, sleep=lambda s: None)
+
+
 @pytest.fixture
 def github(client, remote):
     sync = GitHubSync(FakeGitHub(), TOKEN, remote_template=str(remote))
     client.app.state.github_sync = sync
+    client.app.state.pages_verifier = verifier_for(sync)
     return sync
 
 
@@ -73,14 +82,17 @@ def test_line_history_is_mirrored_and_release_published(github, signed_in, remot
     log = _git(remote, "log", "--oneline", "main")
     assert len(log.splitlines()) > 50 and "merge ai-factory/" in log
     detail = signed_in.get(f"/lines/{line_id}").json()
-    assert detail["publication"]["status"] == "synced"
+    # every playable build was deployed and only marked live after the URL answered 200
+    assert [d["version"] for d in detail["deployments"]] == ["1.0.0", "0.9.0", "0.8.0", "0.5.0", "0.1.0"]
+    assert all(d["status"] == "live" and d["kind"] == "pages" for d in detail["deployments"])
+    assert detail["publication"]["pagesUrl"].startswith("https://ceo.github.io/aif-zombie-")
 
     review = next(r for r in signed_in.get("/reviews").json() if r["line_id"] == line_id and r["blocking"])
     signed_in.post(f"/reviews/{review['id']}/approve", headers=CSRF)
     pub = signed_in.get(f"/lines/{line_id}").json()["publication"]
-    assert pub["status"] == "published" and pub["pagesUrl"].startswith("https://ceo.github.io/")
+    assert pub["status"] == "live" and pub["kind"] == "release" and pub["version"] == "1.0.0"
     assert "data-ai-factory-game" in _git(remote, "show", "main:index.html")
-    assert "release: publish" in _git(remote, "log", "-1", "--format=%s", "main")
+    assert _git(remote, "log", "-1", "--format=%s", "main").startswith("release: v1.0.0")
     assert TOKEN not in str(signed_in.get("/logs").json())
 
 
@@ -101,4 +113,21 @@ def test_publish_without_token_commits_release_locally(signed_in):
     signed_in.post(f"/lines/{line_id}/run", headers=CSRF)
     res = signed_in.post(f"/lines/{line_id}/publish", headers=CSRF).json()
     assert res["status"] == "not_configured"
+    assert all(d["status"] == "not_configured" for d in signed_in.get(f"/lines/{line_id}").json()["deployments"])
     assert signed_in.get(f"/lines/{line_id}").json()["publication"]["status"] == "not_configured"
+
+
+def test_unreachable_pages_url_is_never_marked_live(client, signed_in, remote):
+    sync = GitHubSync(FakeGitHub(), TOKEN, remote_template=str(remote))
+    client.app.state.github_sync = sync
+    client.app.state.pages_verifier = verifier_for(sync, status_code=404)
+    signed_in.post("/projects", json={"topic": "zombie"}, headers=CSRF)
+    line_id = signed_in.get("/lines").json()[0]["id"]
+    for _ in range(40):
+        signed_in.post(f"/lines/{line_id}/tick", headers=CSRF)
+        detail = signed_in.get(f"/lines/{line_id}").json()
+        if detail["deployments"]:
+            break
+    assert detail["deployments"][0]["status"] == "failed"
+    assert "HTTP 404" in detail["deployments"][0]["detail"]
+    assert any(l["type"] == "PUBLISH FAIL" for l in signed_in.get("/logs").json())

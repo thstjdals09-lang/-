@@ -69,6 +69,8 @@ function mapLine(l) {
     commits: l.commits.map((c) => ({ ...c, time: parseTs(c.time), merged: true })),
     artifacts: l.artifacts,
     builds: l.builds.map((b) => ({ ...b, createdAt: parseTs(b.createdAt), bytes: 0 })),
+    publication: l.publication ? { ...l.publication, time: parseTs(l.publication.time) } : null,
+    deployments: (l.deployments || []).map((d) => ({ ...d, time: parseTs(d.time) })),
     feedback: l.feedback.map((f) => ({ id: f.id, text: f.text, time: parseTs(f.created_at), stageId: f.stage_key, taskId: null, status: f.status })),
     messages: l.messages.map((m) => ({ ...m, time: parseTs(m.time) })),
     quotaUsed: 0,
