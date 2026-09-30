@@ -1,6 +1,6 @@
 # AI Factory implementation status
 
-Audit date: 2026-09-30
+Audit date: 2026-09-30 (updated after the collaboration + deployment batch)
 
 Legend: `[x]` implemented and tested, `[-]` partial, `[ ]` not started.
 
@@ -34,6 +34,8 @@ Legend: `[x]` implemented and tested, `[-]` partial, `[ ]` not started.
 - [x] CSRF guard (custom header + Origin allow-list); dev login behind an explicit flag
 - [x] AES-256-GCM vault bound to user and credential id; `vault://` references only; secret redaction
 - [x] Account-scoped settings, connections, projects, lines, quota history and feedback
+- [x] AI ideation room: a planner AI invents concepts; reviewer roles cross-score them on different models (offline patterns only without AI)
+- [x] Design dossier: earlier stages' artifacts and the concept reach every later task, including the programmers
 - [x] Console backend mode: `/state` snapshot, all CEO actions via the API, sandboxed build playback
 - [ ] Hosted backend deployment and production Google OAuth client
 
@@ -53,17 +55,20 @@ Legend: `[x]` implemented and tested, `[-]` partial, `[ ]` not started.
 - [x] Per-task branch `ai-factory/<project>/<line>/<agent>/<stage>-<task>` in its own git worktree
 - [x] Worker commit → reviewer (coding tasks) → merge `--no-ff` into main → worktree and branch cleanup
 - [x] Path confinement for model-supplied file names (incl. Windows anchors/drives), Windows MAX_PATH-safe layout
-- [ ] Push line repositories to GitHub (publisher exists for releases; per-line remote sync not wired)
-- [ ] Parallel workers inside one wave (currently sequential per line)
+- [x] Line repositories mirrored to GitHub (`aif-` repos only; existing repositories are never reused)
+- [x] Parallel workers inside one wave (provider calls concurrent, git/DB finalization serialized)
 
 ## P4: end-to-end generated game
 
 - [x] Topic → ideas → automatic selection → planning artifacts → coding → build → QA → repair → CEO review
-- [x] Model-written single-file game iterated by game tasks, statically validated, last good game kept
+- [x] Model-written single-file game, written from scratch from the design dossier, iterated by game tasks
+- [x] Code review, stage judges and QA send work back as fix + re-check tasks carrying the notes
 - [x] Web release and Windows release folder (offline game + Play.cmd launcher)
-- [ ] Headless runtime QA of generated games (Playwright in an isolated runner) and screenshot capture
+- [x] Isolated runtime QA (offline headless Chromium) with screenshots, auto-repair and safe revert
+- [x] Vision QA receives the runtime screenshot
 - [ ] Native Windows packaging (Tauri/Electron)
-- [ ] Release publishing to GitHub Pages per game from the server Leader
+- [x] Every playable build deployed to GitHub Pages; links shown only after the URL answers 200
+- [x] Verified against real GitHub (repo create → push → Pages → 200)
 
 ## CI
 
