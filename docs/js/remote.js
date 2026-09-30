@@ -78,7 +78,13 @@ function mapLine(l) {
 }
 
 export function fromSnapshot(snap, prev, ctx) {
-  const employees = snap.connections.map((c) => employeeFromConnection(c, ctx)).filter(Boolean);
+  const isSearch = (c) => (ctx.providers.find((p) => p.id === c.catalog_id) || {}).kind === "search";
+  const employees = snap.connections.filter((c) => !isSearch(c)).map((c) => employeeFromConnection(c, ctx)).filter(Boolean);
+  const searchTools = snap.connections.filter(isSearch).map((c) => {
+    const entry = ctx.providers.find((p) => p.id === c.catalog_id);
+    return { id: c.id, catalogId: c.catalog_id, name: entry.name, vendor: entry.vendor, status: c.status, used: c.quota_used || 0,
+      limit: c.quota_limit, window: entry.quota.window, lastError: c.last_error, lastVerified: parseTs(c.last_verified) };
+  });
   if (!employees.some((e) => e.status === "online")) employees.push(simulatedEmployee(ctx));
   return {
     ...prev,
@@ -90,7 +96,9 @@ export function fromSnapshot(snap, prev, ctx) {
       workersPerLine: snap.settings.workers_per_line,
     },
     employees,
-    projects: snap.projects.map((p) => ({ id: p.id, topic: p.topic, genre: p.genre, platform: p.platform, notes: p.notes, createdAt: parseTs(p.created_at), portfolio: [] })),
+    searchTools,
+    projects: snap.projects.map((p) => ({ id: p.id, topic: p.topic, genre: p.genre, platform: p.platform, notes: p.notes, createdAt: parseTs(p.created_at), portfolio: [],
+      status: p.status || "ready", research: p.research || null })),
     ideas: snap.ideas.map((i) => ({ ...i, projectId: i.project_id })),
     lines: snap.lines.map(mapLine),
     reviews: snap.reviews.map((r) => ({

@@ -410,7 +410,17 @@ const remoteActions = {
     });
   },
   "line-autopilot"(id) { const l = lineById(id); remote(() => api.setAutopilot(id, !l.autopilot)); },
-  "line-resume"(id) { remote(() => api.setAutopilot(id, true)); },
+  "line-resume"(id) {
+    const l = lineById(id);
+    remote(() => (l && l.status === "paused" ? api.resumeLine(id) : api.setAutopilot(id, true)));
+  },
+  "tool-remove"(id) {
+    const t = (app.state.searchTools || []).find((x) => x.id === id);
+    if (!t || !confirm(t.name + " 연결과 Vault 키를 삭제할까요? 이후 아이디어 회의는 웹 조사 없이 진행됩니다.")) return;
+    remote(() => api.deleteConnection(id));
+  },
+  "tool-verify"(id) { remote(() => api.verifyConnection(id)); },
+  "market-search"() { app.ui.tab = "market"; app.ui.marketFilter = "search"; render(); },
   "line-step"(id) { remote(() => api.tickLine(id)); },
   "line-ff"(id) { remote(() => api.runLine(id)); },
   approve(id) { remote(() => api.approve(id)); },
@@ -585,6 +595,7 @@ const forms = {
     const fd = new FormData(form);
     const auth = fd.get("auth");
     const endpoint = String(fd.get("endpoint") || "").trim();
+    const model = String(fd.get("model") || "").trim();
     const keyInput = form.querySelector('input[name="api_key"]');
     const apiKey = keyInput ? keyInput.value : "";
     if (keyInput) keyInput.value = ""; // never keep the secret in the DOM longer than needed
@@ -599,6 +610,10 @@ const forms = {
       commit();
     };
 
+    if (p.kind === "search" && app.state.user.mode !== "backend") {
+      status.textContent = "검색 API는 로그인한 서버(백엔드)에서만 연결됩니다. 프리뷰에는 키를 저장하지 않습니다.";
+      return;
+    }
     if (auth === "local" && !isRemote()) {
       status.textContent = "로컬 엔드포인트 헬스체크 중…";
       const probe = await probeLocalEndpoint(endpoint || p.base_url);
@@ -621,10 +636,10 @@ const forms = {
       }
       if (!apiKey && auth === "api_key") { status.textContent = "API Key를 입력하세요."; return; }
       status.textContent = "Vault 저장 · health_check · quota_probe 중…";
-      const res = await api.connectProvider({ catalog_id: p.id, auth_type: auth, api_key: apiKey || null, endpoint: endpoint || null });
+      const res = await api.connectProvider({ catalog_id: p.id, auth_type: auth, api_key: apiKey || null, endpoint: endpoint || null, model: model || null });
       await sync();
       app.ui.connectResult = res.status === "online"
-        ? { providerId: p.id, ok: true, models: res.models, quotaLimit: res.quota_limit, quotaUsed: res.quota_used, quotaUnit: res.quota_unit,
+        ? { providerId: p.id, ok: true, models: res.models, model: res.model, quotaLimit: res.quota_limit, quotaUsed: res.quota_used, quotaUnit: res.quota_unit,
             credentialRef: res.credential_ref, fingerprint: res.credential_fingerprint }
         : { providerId: p.id, ok: false, message: (res.status === "auth_required" ? "키가 거부되었습니다. 키를 다시 확인하세요. " : "서버가 AI에 접속하지 못했습니다. ") + (res.last_error || "") };
       if (res.status !== "online") await api.deleteConnection(res.id).catch(() => {});

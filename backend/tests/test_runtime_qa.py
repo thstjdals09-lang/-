@@ -43,32 +43,74 @@ CRASHING_GAME = """```html
 ```"""
 
 
-def test_failed_runtime_gate_repairs_then_reverts_to_safe_game(runtime_on, signed_in, http):
+def test_failed_runtime_gate_repairs_rewrites_then_pauses_without_template(runtime_on, signed_in, http):
     http.add("GET", "api.groq.com/openai/v1/models", lambda r: httpx.Response(200, json={"data": [{"id": "llama"}]}))
     signed_in.post("/providers/connections", json={"catalog_id": "groq", "auth_type": "api_key", "api_key": "gsk_test_1234567890"}, headers=CSRF)
 
+    prompts = []
+
     def chat(req):
         prompt = json.loads(req.content)["messages"][-1]["content"]
+        prompts.append(prompt)
         text = "notes\n" + CRASHING_GAME if "# Game deliverable" in prompt else "ok\nRESULT: PASS"
         return httpx.Response(200, json={"choices": [{"message": {"content": text}}]})
 
     http.add("POST", "chat/completions", chat)
     signed_in.post("/projects", json={"topic": "좀비"}, headers=CSRF)
     line_id = signed_in.get("/lines").json()[0]["id"]
-    for _ in range(40):
+    for _ in range(60):
         signed_in.post(f"/lines/{line_id}/tick", headers=CSRF)
         detail = signed_in.get(f"/lines/{line_id}").json()
-        if detail["builds"]:
+        if detail["status"] != "running":
             break
     types = [l["type"] for l in signed_in.get("/logs").json()]
-    assert types.count("RUNTIME QA FAIL") == 2 and "RUNTIME REVERT" in types
+    assert types.count("RUNTIME QA FAIL") == 2 and types.count("GAME REWRITE") == 2 and "LINE PAUSED" in types
+    assert "RUNTIME REVERT" not in types and "RUNTIME ROLLBACK" not in types
     keys = [t["id"] for t in detail["stages"]["prototype"]["tasks"]]
-    assert "runtime-fix1" in keys and "runtime-fix2" in keys
-    build = detail["builds"][0]
-    assert build["runtime"] == "passed" and build["screenshot"]
-    shot = signed_in.get(f"/builds/{build['id']}/screenshot.png")
-    assert shot.status_code == 200 and shot.content.startswith(b"\x89PNG")
-    assert "CRASH" not in signed_in.get(f"/builds/{build['id']}/play").text
+    assert {"runtime-fix1", "runtime-fix2", "rewrite1", "rewrite2"} <= set(keys)
+    # the emergency template is never shipped as the AI's build
+    assert detail["status"] == "paused" and detail["builds"] == []
+    rewrite = next(p for p in prompts if "게임 처음부터 다시 작성" in p)
+    assert "No game exists yet" in rewrite and "# Current game source" not in rewrite
+    # resuming grants another rewrite
+    assert signed_in.post(f"/lines/{line_id}/resume", headers=CSRF).json()["status"] == "running"
+    keys = [t["id"] for t in signed_in.get(f"/lines/{line_id}").json()["stages"]["prototype"]["tasks"]]
+    assert any(k.startswith("rewrite-r") for k in keys)
+
+
+def test_last_passing_ai_game_is_restored_after_failed_fixes(runtime_on, signed_in, http):
+    http.add("GET", "api.groq.com/openai/v1/models", lambda r: httpx.Response(200, json={"data": [{"id": "llama"}]}))
+    signed_in.post("/providers/connections", json={"catalog_id": "groq", "auth_type": "api_key", "api_key": "gsk_test_1234567890"}, headers=CSRF)
+    good = """```html
+<!doctype html><html><body data-ai-factory-game="v2"><h1>GOOD-GAME</h1><button id="b">go</button><canvas width="10" height="10"></canvas>
+<script>function startGame(){document.getElementById('b').textContent='started'};document.addEventListener('keydown',()=>{document.body.dataset.k=1});startGame();</script></body></html>
+```"""
+    state = {"crash": False}
+
+    def chat(req):
+        prompt = json.loads(req.content)["messages"][-1]["content"]
+        if "# Game deliverable" in prompt:
+            return httpx.Response(200, json={"choices": [{"message": {"content": "notes\n" + (CRASHING_GAME if state["crash"] else good)}}]})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok\nRESULT: PASS"}}]})
+
+    http.add("POST", "chat/completions", chat)
+    signed_in.post("/projects", json={"topic": "좀비"}, headers=CSRF)
+    line_id = signed_in.get("/lines").json()[0]["id"]
+    for _ in range(40):
+        signed_in.post(f"/lines/{line_id}/tick", headers=CSRF)
+        if signed_in.get(f"/lines/{line_id}").json()["builds"]:
+            break
+    assert signed_in.get(f"/lines/{line_id}").json()["builds"][0]["runtime"] == "passed"
+    state["crash"] = True  # later programmers break the game and cannot fix it
+    for _ in range(60):
+        signed_in.post(f"/lines/{line_id}/tick", headers=CSRF)
+        detail = signed_in.get(f"/lines/{line_id}").json()
+        if len(detail["builds"]) >= 2:
+            break
+    types = [l["type"] for l in signed_in.get("/logs").json()]
+    assert "RUNTIME ROLLBACK" in types
+    latest = detail["builds"][0]
+    assert "GOOD-GAME" in signed_in.get(f"/builds/{latest['id']}/play").text
 
 
 def test_vision_qa_receives_the_runtime_screenshot(runtime_on, signed_in, http):

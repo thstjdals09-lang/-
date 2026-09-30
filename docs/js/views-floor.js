@@ -90,6 +90,8 @@ export function dashboard(app) {
       (state.user.mode !== "backend"
         ? '<p class="notice">프리뷰 모드에는 AI가 연결되어 있지 않습니다. 공정·배정·커밋은 시뮬레이션이고 게임은 기본 템플릿 3종 중 하나로 만들어집니다. AI가 직접 아이디어를 내고 게임을 새로 만드는 것은 백엔드 + AI 연결에서 동작합니다.</p>'
         : "") +
+      (p.status === "ideating" ? '<p class="notice">AI 회의 진행 중: 웹 시장 조사 → 여러 AI의 발상 → 교차 비평 → 반론 → 합의. 몇 분 뒤 아이디어와 생산라인이 나타납니다 (로그에서 진행 상황 확인).</p>' : "") +
+      (p.status === "failed" ? '<p class="notice">AI 회의가 중단되었습니다. 로그를 확인한 뒤 새 주제로 다시 시작하세요.</p>' : "") +
       '<p class="muted">' + state.ideas.filter((i) => i.projectId === p.id).length + "개 아이디어 · " +
       state.lines.filter((l) => l.projectId === p.id).length + "개 생산라인 · Backlog " + state.ideas.filter((i) => i.projectId === p.id && i.status === "backlog").length + "개</p></section>";
   }
@@ -145,7 +147,17 @@ export function ideas(app) {
     (i.concept
       ? '<div class="concept"><div class="chips">' + (i.concept.mechanics || []).map((m) => '<span class="chip">' + esc(m) + "</span>").join("") + "</div>" +
         (i.concept.why_fun ? '<p class="muted small">재미 가설 · ' + esc(i.concept.why_fun) + "</p>" : "") +
-        '<small class="muted">발상 · ' + esc(i.concept.creator || "AI") + "</small></div>"
+        (i.concept.market_fit ? '<p class="muted small">시장 근거 · ' + esc(i.concept.market_fit) + "</p>" : "") +
+        '<small class="muted">발상 · ' + esc(i.concept.creator || "AI") + (i.concept.research ? " · 웹 조사 반영" : "") + "</small>" +
+        (i.concept.rebuttal || i.concept.consensus
+          ? '<details class="debate"><summary>AI 회의 기록' + (i.concept.decision ? " · " + esc({ go: "진행", revise: "보완 후 진행", drop: "보류" }[i.concept.decision] || i.concept.decision) : "") + "</summary>" +
+            (i.concept.rebuttal ? '<p class="small"><strong>작성자 반론</strong> ' + esc(i.concept.rebuttal) + "</p>" : "") +
+            ((i.concept.revision || []).length ? '<p class="small"><strong>수정안</strong> ' + i.concept.revision.map(esc).join(" · ") + "</p>" : "") +
+            (i.concept.consensus ? '<p class="small"><strong>합의 (' + esc(i.concept.moderator || "") + ")</strong> " + esc(i.concept.consensus) + "</p>" : "") +
+            ((i.concept.risks || []).length ? '<p class="small"><strong>리스크</strong> ' + i.concept.risks.map(esc).join(" · ") + "</p>" : "") +
+            "</details>"
+          : "") +
+        "</div>"
       : "") +
     '<div class="metrics">' + criteria.map((c) => '<div><small>' + esc(c.label) + "</small>" + meter(i.metrics[c.id], { tone: i.metrics[c.id] >= 80 ? "good" : i.metrics[c.id] >= 65 ? "info" : "warn" }) + "<b>" + i.metrics[c.id] + "</b></div>").join("") + "</div>" +
     '<ul class="reviews">' + i.reviews.map((r) => "<li><strong>" + esc(r.role) + "</strong>" + (r.reviewer ? ' <span class="muted">(' + esc(r.reviewer) + ")</span>" : "") + " " + esc(r.verdict) + " (" + r.score + ") · " + esc(r.note) + "</li>").join("") + "</ul>" +
@@ -156,11 +168,26 @@ export function ideas(app) {
     "</article>";
 
   const shortlisted = list.filter((i) => i.status !== "backlog" && i.status !== "candidate");
+  const r = project.research;
+  const bullets = (label, items) => (items && items.length ? "<div><h4>" + label + '</h4><ul class="plainList compact">' + items.map((x) => "<li>" + esc(x) + "</li>").join("") + "</ul></div>" : "");
+  const researchPanel = state.user.mode !== "backend" ? "" : r
+    ? '<section class="panel"><div class="panelHead"><div><div class="eyebrow">MARKET RESEARCH · ' + esc(r.provider || "") + (r.analyst ? " · 분석 " + esc(r.analyst) : "") + "</div><h2>웹 시장 조사</h2></div>" +
+      '<span class="chip">검색 ' + (r.queries || []).length + "회 · 출처 " + (r.sources || []).length + "개</span></div>" +
+      (r.brief
+        ? "<p>" + esc(r.brief.summary) + '</p><div class="researchGrid">' + bullets("트렌드", r.brief.trends) + bullets("잘 먹히는 메커닉", r.brief.popular_mechanics) +
+          bullets("플레이어 불만", r.brief.pain_points) + bullets("포화 · 피할 것", r.brief.saturated) + bullets("기회", r.brief.opportunities) + "</div>"
+        : '<p class="muted">분석 AI가 브리프를 쓰지 못해 검색 요약만 AI들에게 전달했습니다.</p>') +
+      '<details><summary>출처 ' + (r.sources || []).length + "개</summary><ul class=\"plainList compact\">" +
+      (r.sources || []).map((h) => '<li><a href="' + esc(h.url) + '" target="_blank" rel="noopener noreferrer">' + esc(h.title) + "</a><small>" + esc(h.snippet.slice(0, 140)) + "</small></li>").join("") + "</ul></details></section>"
+    : project.status === "ideating"
+      ? '<section class="panel"><p class="notice">AI 회의 진행 중… 시장 조사와 발상이 끝나면 여기에 표시됩니다.</p></section>'
+      : '<section class="panel"><p class="muted">이 주제는 웹 시장 조사 없이 발상했습니다. <button class="btn small" data-action="market-search">검색 API 연결</button> 후 새 주제부터 조사가 반영됩니다.</p></section>';
   const backlog = list.filter((i) => i.status === "backlog" || i.status === "candidate");
   return (
     (state.projects.length > 1
       ? '<div class="segmented">' + state.projects.map((p) => '<button class="' + (p.id === project.id ? "on" : "") + '" data-action="project" data-id="' + esc(p.id) + '">' + esc(p.topic) + "</button>").join("") + "</div>"
       : "") +
+    researchPanel +
     '<section class="panel"><div class="panelHead"><div><div class="eyebrow">IDEATION ROOM · ' + esc(project.topic) + "</div><h2>자동 Shortlist</h2></div>" +
     '<button class="btn danger small" data-action="project-delete" data-id="' + esc(project.id) + '">이 주제 삭제</button>' +
     '<span class="chip">가중치: ' + criteria.map((c) => esc(c.label) + " " + Math.round(c.weight * 100) + "%").join(" · ") + "</span></div>" +

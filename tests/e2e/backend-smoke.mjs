@@ -80,8 +80,13 @@ try {
   check((await frame.getAttribute("src")).includes("/builds/"), "backend build should be played from the sandboxed endpoint");
   await page.getByRole("button", { name: "닫기" }).click();
   await page.locator(".reviewCard", { hasText: "승인 필요" }).first().getByRole("button", { name: "승인" }).click();
-  await page.waitForTimeout(800);
-  const after = await page.evaluate(async (o) => (await fetch(o + "/state", { credentials: "include" })).json(), origin);
+  // the approval commits as soon as the server's write lock is free (the autopilot keeps the other lines busy)
+  let after = null;
+  for (let i = 0; i < 60; i++) {
+    await page.waitForTimeout(500);
+    after = await page.evaluate(async (o) => (await fetch(o + "/state", { credentials: "include" })).json(), origin);
+    if (after.lines.some((l) => l.stage === "live" && l.status !== "awaiting_ceo")) break;
+  }
   check(after.lines.some((l) => l.stage === "live" && l.status !== "awaiting_ceo"), "approved release must leave the CEO gate (no awaiting_ceo at live)");
 
   await page.locator(".accountChip").click();

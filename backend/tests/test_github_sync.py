@@ -74,7 +74,10 @@ def test_existing_repository_is_never_reused():
     assert not any(method == "POST" and "/git/" in path for method, path in fake.calls)
 
 
-def _to_release(client):
+def _to_release(client, http):
+    from .test_collaboration import _setup
+
+    _setup(client, http)
     client.post("/projects", json={"topic": "zombie"}, headers=CSRF)
     line_id = client.get("/lines").json()[0]["id"]
     assert client.post(f"/lines/{line_id}/run", headers=CSRF).json()["status"] == "awaiting_ceo"
@@ -86,8 +89,8 @@ def _approve(client, line_id):
     assert client.post(f"/reviews/{review['id']}/approve", headers=CSRF).status_code == 200
 
 
-def test_nothing_is_pushed_until_the_finished_game_is_approved(github, signed_in, remote):
-    line_id = _to_release(signed_in)
+def test_nothing_is_pushed_until_the_finished_game_is_approved(github, signed_in, remote, http):
+    line_id = _to_release(signed_in, http)
     # a whole production run: no repository, no push, no Pages while the game is being made
     assert not any(m == "POST" for m, _ in github._client.calls)
     assert _git(remote, "for-each-ref") == ""
@@ -99,6 +102,7 @@ def test_nothing_is_pushed_until_the_finished_game_is_approved(github, signed_in
     pub = signed_in.get(f"/lines/{line_id}").json()["publication"]
     assert pub["status"] == "live" and pub["kind"] == "release" and pub["version"] == "1.0.0"
     assert pub["pagesUrl"].startswith("https://ceo.github.io/aif-zombie-")
+    assert "FROM-SCRATCH" in _git(remote, "show", "main:index.html") or "IMPROVED" in _git(remote, "show", "main:index.html")
     # one clean commit: the finished game, not the task history
     assert _git(remote, "log", "--format=%s", "main").splitlines() == [f"release: v1.0.0 {signed_in.get(f'/lines/{line_id}').json()['title']}"]
     files = set(_git(remote, "ls-tree", "--name-only", "main").split())
@@ -107,8 +111,8 @@ def test_nothing_is_pushed_until_the_finished_game_is_approved(github, signed_in
     assert TOKEN not in str(signed_in.get("/logs").json())
 
 
-def test_a_revised_release_is_a_second_commit_on_the_same_repository(github, signed_in, remote):
-    line_id = _to_release(signed_in)
+def test_a_revised_release_is_a_second_commit_on_the_same_repository(github, signed_in, remote, http):
+    line_id = _to_release(signed_in, http)
     _approve(signed_in, line_id)
     assert signed_in.post(f"/lines/{line_id}/run", headers=CSRF).json()["status"] == "complete"
     assert signed_in.post(f"/lines/{line_id}/feedback", json={"text": "적 속도를 조금 낮춰줘"}, headers=CSRF).status_code == 201
@@ -119,10 +123,10 @@ def test_a_revised_release_is_a_second_commit_on_the_same_repository(github, sig
     assert sum(1 for m, p in github._client.calls if m == "POST" and p == "/user/repos") == 1
 
 
-def test_repository_from_the_old_flow_is_fast_forwarded(github, signed_in, remote, tmp_path):
+def test_repository_from_the_old_flow_is_fast_forwarded(github, signed_in, remote, tmp_path, http):
     from app import db
 
-    line_id = _to_release(signed_in)
+    line_id = _to_release(signed_in, http)
     seed = tmp_path / "seed"
     subprocess.run(["git", "init", "-q", "-b", "main", str(seed)], check=True)
     (seed / "old.txt").write_text("task history pushed by an earlier version", encoding="utf-8")
@@ -139,9 +143,9 @@ def test_repository_from_the_old_flow_is_fast_forwarded(github, signed_in, remot
     assert ("POST", "/user/repos") not in github._client.calls
 
 
-def test_publish_failure_is_logged_without_the_token(client, signed_in, tmp_path):
+def test_publish_failure_is_logged_without_the_token(client, signed_in, tmp_path, http):
     client.app.state.github_sync = GitHubSync(FakeGitHub(), TOKEN, remote_template=str(tmp_path / "missing.git"))
-    line_id = _to_release(signed_in)
+    line_id = _to_release(signed_in, http)
     _approve(signed_in, line_id)
     logs = signed_in.get("/logs").json()
     assert any(l["type"] == "PUBLISH FAIL" for l in logs)
@@ -150,7 +154,10 @@ def test_publish_failure_is_logged_without_the_token(client, signed_in, tmp_path
     assert detail["publication"]["status"] == "failed" and detail["status"] == "running"
 
 
-def test_publish_without_token_keeps_the_release_on_the_server(signed_in):
+def test_publish_without_token_keeps_the_release_on_the_server(signed_in, http):
+    from .test_collaboration import _setup
+
+    _setup(signed_in, http)
     signed_in.post("/projects", json={"topic": "zombie"}, headers=CSRF)
     line_id = signed_in.get("/lines").json()[0]["id"]
     assert signed_in.post(f"/lines/{line_id}/publish", headers=CSRF).status_code == 409
@@ -160,11 +167,11 @@ def test_publish_without_token_keeps_the_release_on_the_server(signed_in):
     assert signed_in.get(f"/lines/{line_id}").json()["publication"]["status"] == "not_configured"
 
 
-def test_unreachable_pages_url_is_never_marked_live(client, signed_in, remote):
+def test_unreachable_pages_url_is_never_marked_live(client, signed_in, remote, http):
     sync = GitHubSync(FakeGitHub(), TOKEN, remote_template=str(remote))
     client.app.state.github_sync = sync
     client.app.state.pages_verifier = verifier_for(sync, status_code=404)
-    line_id = _to_release(signed_in)
+    line_id = _to_release(signed_in, http)
     _approve(signed_in, line_id)
     detail = signed_in.get(f"/lines/{line_id}").json()
     assert detail["deployments"][0]["status"] == "failed"
@@ -172,3 +179,13 @@ def test_unreachable_pages_url_is_never_marked_live(client, signed_in, remote):
     assert any(l["type"] == "PUBLISH FAIL" for l in signed_in.get("/logs").json())
     # the release can be retried from the console after the approval
     assert signed_in.post(f"/lines/{line_id}/publish", headers=CSRF).status_code == 200
+
+
+def test_the_emergency_template_is_never_published(github, signed_in, remote):
+    # no AI connected: the simulated line ships the template game, which must not reach GitHub
+    signed_in.post("/projects", json={"topic": "zombie"}, headers=CSRF)
+    line_id = signed_in.get("/lines").json()[0]["id"]
+    assert signed_in.post(f"/lines/{line_id}/run", headers=CSRF).json()["status"] == "awaiting_ceo"
+    assert signed_in.post(f"/lines/{line_id}/publish", headers=CSRF).json()["status"] == "no_game"
+    assert _git(remote, "for-each-ref") == ""
+    assert any(l["type"] == "PUBLISH BLOCKED" for l in signed_in.get("/logs").json())

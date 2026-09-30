@@ -38,17 +38,15 @@ class OpenAICompatibleAdapter(ProviderAdapter):
             messages.append({"role": "user", "content": request.prompt})
         model = request.model or self.model
         start = self._timer()
-        res = self._request(
-            "POST",
-            self.base_url + "/chat/completions",
-            headers=self._headers(),
-            json={"model": model, "messages": messages, "max_tokens": request.max_tokens, "temperature": request.temperature},
-        )
+        res = self._request("POST", self.base_url + "/chat/completions", headers=self._headers(), json=self._body(model, messages, request))
         self._capture_quota(res)
         payload = res.json()
         choice = (payload.get("choices") or [{}])[0]
         text = (choice.get("message") or {}).get("content") or choice.get("text") or ""
         return ExecuteResult(text=text, model=payload.get("model", model or ""), usage=self.usage_parser(payload), latency_ms=self._elapsed_ms(start))
+
+    def _body(self, model, messages, request: ExecuteRequest) -> dict:
+        return {"model": model, "messages": messages, "max_tokens": request.max_tokens, "temperature": request.temperature}
 
     def usage_parser(self, payload: dict) -> Usage:
         usage = payload.get("usage") or {}
@@ -66,6 +64,19 @@ class OpenAICompatibleAdapter(ProviderAdapter):
                 except ValueError:
                     continue
                 return
+
+
+class OpenAIAdapter(OpenAICompatibleAdapter):
+    """api.openai.com: reasoning models (gpt-5, o-series) take max_completion_tokens, which also pays
+    for hidden reasoning, and only the default temperature."""
+
+    adapter_id = "openai"
+    REASONING = ("gpt-5", "o1", "o3", "o4")
+
+    def _body(self, model, messages, request: ExecuteRequest) -> dict:
+        if str(model or "").startswith(self.REASONING):
+            return {"model": model, "messages": messages, "max_completion_tokens": request.max_tokens + 8000}
+        return {"model": model, "messages": messages, "max_completion_tokens": request.max_tokens, "temperature": request.temperature}
 
 
 class OpenRouterAdapter(OpenAICompatibleAdapter):

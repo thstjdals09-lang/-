@@ -299,6 +299,11 @@ MIGRATIONS: list[str] = [
     """
     ALTER TABLE users ADD COLUMN password_hash TEXT;
     """,
+    # 9 — ideation room runs in the background; market research brief per project.
+    """
+    ALTER TABLE projects ADD COLUMN status TEXT NOT NULL DEFAULT 'ready';
+    ALTER TABLE projects ADD COLUMN research TEXT;
+    """,
 ]
 
 

@@ -49,6 +49,14 @@ Legend: `[x]` implemented and tested, `[-]` partial, `[ ]` not started.
 - [ ] ComfyUI, local audio and Anthropic adapters (catalog entries are marked `planned`)
 - [ ] Live verification of every free-tier quota against real accounts (needs keys)
 
+## Ideation room and workforce
+
+- [x] Web market research (Tavily / Brave / Serper search APIs in the vault) → analyst AI brief: trends, mechanics, pain points, saturated ideas, opportunities, sources
+- [x] Several AIs invent concepts (an unparseable answer is handed to another AI), reviewers critique, authors rebut, a moderator records the consensus production follows
+- [x] The ideation room runs in the background (minutes-long meetings do not hit request/tunnel timeouts); restarts resume it
+- [x] Paid providers on the user's own keys: OpenAI, Anthropic (Messages API adapter), xAI, DeepSeek, Gemini Pro, OpenRouter paid
+- [x] Load balancing: every capable AI shares the work (in-flight + recent use), paid AIs after free ones except game code/judges; AIs added mid-production get the next tasks; wave size follows the number of AIs
+
 ## P3: GitHub worker execution
 
 - [x] Dependency-aware task graph scheduler (server Leader) with per-line locks and a server autopilot
@@ -64,7 +72,8 @@ Legend: `[x]` implemented and tested, `[-]` partial, `[ ]` not started.
 - [x] Model-written single-file game, written from scratch from the design dossier, iterated by game tasks
 - [x] Code review, stage judges and QA send work back as fix + re-check tasks carrying the notes
 - [x] Web release and Windows release folder (offline game + Play.cmd launcher)
-- [x] Isolated runtime QA (offline headless Chromium) with screenshots, auto-repair and safe revert
+- [x] Isolated runtime QA (offline headless Chromium) with screenshots and auto-repair; after failed fixes: rollback to the last passing AI game, else a from-scratch rewrite by a different AI, else the line pauses (the template is never built or published as AI work)
+- [x] Diff replies from workers are applied by content (never half-applied); game prompts demand whole files
 - [x] Vision QA receives the runtime screenshot
 - [ ] Native Windows packaging (Tauri/Electron)
 - [x] Each approved release is one clean commit (game + README + screenshot, no task history) on the repo's main → Pages; links shown only after the URL answers 200

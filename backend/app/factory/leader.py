@@ -21,6 +21,7 @@ from .. import catalog, db, routing, vault
 from ..connections import next_reset
 from ..providers import NON_CHAT, AdapterUnavailable, build_adapter, choose_model
 from . import ai_ideation, games, runtime_qa
+from . import research as market
 from .executor import SIM_ID, SIM_NAME, AllProvidersFailed, TaskContext, build_prompt, extract_game, qa_verdict, run_with_failover, simulate, to_file_content
 from .ideation import generate_ideas, slugify
 from .github_sync import GitHubSync, GitHubSyncError, RepoRef, repo_name
@@ -32,6 +33,9 @@ from ..github_publisher import GitHubAPIError, GitHubClient
 FALLBACK_KIND = {"vision": "qa", "image": "design", "audio": "design"}
 GAME_PATH = "game/index.html"  # the canonical, always-playable game on main
 MAX_RUNTIME_FIXES = 2
+MAX_REWRITES = 2  # from-scratch rewrites by another, stronger AI once fixes are spent
+MAX_WAVE = 6  # parallel tasks per line when enough AIs are connected
+RECENT_MINUTES = 30  # load-balancing window
 COOLDOWN = {"rate_limited": 45, "transient": 10, "unknown": 5}
 DEFAULT_USER_SETTINGS = {"policy": "cheapest_viable_quality", "max_parallel": 3, "auto_shortlist": 3, "workers_per_line": 3}
 
@@ -92,6 +96,9 @@ class Factory:
         self.stages = self.studio["stages"]
         self._locks: dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()
+        self._inflight: dict[str, int] = {}  # connection id → tasks running on it right now
+        self._inflight_guard = threading.Lock()
+        self.background_ideation = False  # the server runs the ideation room off the request thread
 
     def line_lock(self, line_id: str) -> threading.Lock:
         """One Leader at a time per line (API requests and the autopilot thread share lines)."""
@@ -116,18 +123,55 @@ class Factory:
     # ------------------------------------------------------------------ portfolio
 
     def create_project(self, conn, user_id, *, topic, genre="자동선택", platform="Windows PC", notes="") -> str:
-        s = self.user_settings(conn, user_id)
         project_id = _id("prj")
-        conn.execute("INSERT INTO projects(id, user_id, topic, genre, platform, notes) VALUES (?,?,?,?,?,?)", (project_id, user_id, topic, genre, platform, notes))
-        ideas = ai_ideation.ideate(self, conn, user_id, topic=topic, genre=genre, platform=platform, notes=notes, studio=self.studio)
+        conn.execute("INSERT INTO projects(id, user_id, topic, genre, platform, notes, status) VALUES (?,?,?,?,?,?,'ideating')",
+                     (project_id, user_id, topic, genre, platform, notes))
+        if self.background_ideation and any(e.status == "online" for e, _, _ in self.employees(conn, user_id)):
+            # research + several AI calls take minutes: longer than a browser request or a tunnel allows
+            self.log(conn, user_id, "IDEATION", f"{topic} · AI 회의 시작: 시장 조사 → 발상 → 교차 비평 → 반론 → 합의 (몇 분 걸립니다)")
+            conn.commit()
+            self._start_ideation(user_id, project_id)
+        else:
+            self._run_ideation(conn, user_id, project_id)
+        return project_id
+
+    def _start_ideation(self, user_id, project_id) -> threading.Thread:
+        job = threading.Thread(target=self._ideation_job, args=(user_id, project_id), name="ai-factory-ideation", daemon=True)
+        job.start()
+        return job
+
+    def _ideation_job(self, user_id, project_id):
+        conn = db.connect(autocommit=True)  # every write commits at once: no lock is held across AI calls
+        try:
+            self._run_ideation(conn, user_id, project_id)
+        except Exception as exc:  # the project must not stay "ideating" forever
+            conn.execute("UPDATE projects SET status='failed' WHERE id=?", (project_id,))
+            self.log(conn, user_id, "IDEATION ERROR", f"{type(exc).__name__}: {exc}"[:300])
+        finally:
+            conn.close()
+
+    def _run_ideation(self, conn, user_id, project_id):
+        p = conn.execute("SELECT * FROM projects WHERE id=? AND user_id=?", (project_id, user_id)).fetchone()
+        if p is None:
+            return
+        topic, genre, platform, notes = p["topic"], p["genre"] or "자동선택", p["platform"] or "Web", p["notes"] or ""
+        research = self._research(conn, user_id, topic, genre, platform)
+        conn.execute("UPDATE projects SET research=? WHERE id=?", (market.to_json(research), project_id))
+        ideas = ai_ideation.ideate(self, conn, user_id, topic=topic, genre=genre, platform=platform, notes=notes, studio=self.studio, research=research)
         if ideas is None:
             ideas = generate_ideas(topic, genre, platform, self.studio)
             self.log(conn, user_id, "IDEATION", f"{topic} · 연결된 AI가 없어 오프라인 아이디어 패턴으로 생성 (AI 마켓에서 AI를 연결하면 AI가 직접 발상)")
+        if conn.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone() is None:
+            return  # deleted while the room was meeting
+        s = self.user_settings(conn, user_id)
         running = conn.execute("SELECT COUNT(*) FROM production_lines WHERE user_id=? AND status='running'", (user_id,)).fetchone()[0]
         n = min(s["auto_shortlist"], max(0, s["max_parallel"] - running), len(ideas))
+        # consensus "drop" ideas are never produced automatically
+        eligible = [i for i in ideas if (i.get("concept") or {}).get("decision") != "drop"][:n]
+        chosen = {id(i) for i in eligible}
         for idea in ideas:
             idea_id = _id("idea")
-            status = "shortlisted" if idea["rank"] <= n else "backlog"
+            status = "shortlisted" if id(idea) in chosen else "backlog"
             conn.execute(
                 "INSERT INTO ideas(id, project_id, rank, title, type, family, pitch, loop, metrics, reviews, score, status, concept) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (idea_id, project_id, idea["rank"], idea["title"], idea["type"], idea["family"], idea["pitch"], json.dumps(idea["loop"], ensure_ascii=False),
@@ -136,8 +180,69 @@ class Factory:
             )
             if status == "shortlisted":
                 self.create_line(conn, user_id, idea_id, automatic=True)
-        self.log(conn, user_id, "SHORTLIST", f"{topic} · 아이디어 {len(ideas)}개 · 상위 {n}개 자동 생산라인 · {len(ideas) - n}개 Backlog")
-        return project_id
+        conn.execute("UPDATE projects SET status='ready' WHERE id=?", (project_id,))
+        self.log(conn, user_id, "SHORTLIST", f"{topic} · 아이디어 {len(ideas)}개 · 상위 {len(eligible)}개 자동 생산라인 · {len(ideas) - len(eligible)}개 Backlog")
+
+    def search_tool(self, conn, user_id):
+        """The account's first online web-search connection as (row, entry, adapter), or None."""
+        for row in conn.execute("SELECT * FROM provider_connections WHERE user_id=? AND status='online' ORDER BY created_at", (user_id,)).fetchall():
+            entry = catalog.provider(self.catalog_dir, row["catalog_id"])
+            if entry and entry.get("kind") == "search":
+                try:
+                    return row, entry, self._adapter(conn, user_id, row, entry)
+                except (AdapterUnavailable, vault.VaultError, ValueError):
+                    continue
+        return None
+
+    def _research(self, conn, user_id, topic, genre, platform) -> dict | None:
+        """Web search → analyst AI → market brief. None without a search connection."""
+        tool = self.search_tool(conn, user_id)
+        if tool is None:
+            self.log(conn, user_id, "RESEARCH", f"{topic} · 검색 API 미연결 → 웹 시장 조사 없이 AI 지식만으로 발상 (AI 마켓 → 검색에서 연결)")
+            return None
+        row, entry, adapter = tool
+        conn.commit()
+        qs, hits, errors = market.gather(adapter, topic, genre)
+        conn.execute("UPDATE provider_connections SET quota_used=COALESCE(quota_used,0)+?, last_error=? WHERE id=?",
+                     (len(qs), errors[0] if errors and not hits else None, row["id"]))
+        if not hits:
+            self.log(conn, user_id, "RESEARCH", f"{topic} · {entry['name']} 검색 실패/결과 없음 → AI 지식만으로 발상" + (f" ({errors[0][:120]})" if errors else ""))
+            return None
+        research = {"provider": entry["name"], "queries": qs, "sources": [h.__dict__ for h in hits], "brief": None, "analyst": None, "at": _iso()}
+        request = market.analyst_prompt(topic, genre, platform, hits)
+        try:
+            text, analyst = self._ask(conn, user_id, request, kind="planning", difficulty=2)
+            research["brief"] = market.parse_brief(ai_ideation._json_block(text), hits)
+            research["analyst"] = analyst if research["brief"] else None
+        except AllProvidersFailed:
+            pass
+        self.log(conn, user_id, "RESEARCH", f"{topic} · {entry['name']} 웹 검색 {len(qs)}회 · 출처 {len(hits)}개" +
+                 (f" → {research['analyst']}가 시장 조사 브리프 작성" if research["brief"] else " → 브리프 작성 실패, 검색 요약만 전달"))
+        return research
+
+    def _ask(self, conn, user_id, request, *, kind="planning", difficulty=2) -> tuple[str, str]:
+        """One routed call outside a line (research analyst), with failover, load balancing and accounting."""
+        team = self.employees(conn, user_id)
+        rtask = routing.Task(kind=kind, difficulty=difficulty, critical=True)
+        decision = routing.route(rtask, [e for e, _, _ in team], policy=self.user_settings(conn, user_id)["policy"])
+        by_id = {e.id: (row, entry) for e, row, entry in team}
+        candidates = []
+        for c in self._order(conn, user_id, decision, quality=False):
+            row, entry = by_id[c.employee.id]
+            try:
+                candidates.append((c.employee.id, c.employee.name, self._adapter(conn, user_id, row, entry)))
+            except (AdapterUnavailable, vault.VaultError, ValueError):
+                continue
+        if not candidates:
+            raise AllProvidersFailed([])
+        conn.commit()
+        try:
+            text, attempts = run_with_failover(candidates, request)
+        except AllProvidersFailed as exc:
+            self._record_attempts(conn, user_id, None, None, exc.attempts, rtask)
+            raise
+        self._record_attempts(conn, user_id, None, None, attempts, rtask)
+        return text, attempts[-1].name
 
     def create_line(self, conn, user_id, idea_id, *, automatic=False) -> str:
         idea = conn.execute("SELECT i.*, p.topic, p.user_id FROM ideas i JOIN projects p ON p.id=i.project_id WHERE i.id=?", (idea_id,)).fetchone()
@@ -174,8 +279,8 @@ class Factory:
         out = []
         for row in conn.execute("SELECT * FROM provider_connections WHERE user_id=? AND status NOT IN ('pending')", (user_id,)).fetchall():
             entry = catalog.provider(self.catalog_dir, row["catalog_id"])
-            if entry is None:
-                continue
+            if entry is None or entry.get("kind") == "search":
+                continue  # search APIs are research tools, never task workers
             reset_at = _parse(row["quota_reset_at"])
             if reset_at and now >= reset_at:
                 conn.execute("UPDATE provider_connections SET quota_used=0, quota_reset_at=? WHERE id=?", (_iso(next_reset(row["quota_window"], now)), row["id"]))
@@ -188,6 +293,31 @@ class Factory:
             )
             out.append((e, row, entry))
         return out
+
+    def _order(self, conn, user_id, decision, *, quality: bool, avoid=frozenset()) -> list:
+        """Spreads work over every capable AI instead of always the same few: candidates that meet the
+        quality bar are ordered by price band, tasks running on them now, and use in the last
+        RECENT_MINUTES, so every connected AI shares the load and a newly connected one is picked
+        on the very next assignment. Paid AIs stay behind the free ones except for quality-critical
+        work (game code, judges); AIs below the bar remain a last-resort tail."""
+        since = _iso(_now() - timedelta(minutes=RECENT_MINUTES))
+        recent = {r["connection_id"]: r["n"] for r in conn.execute(
+            "SELECT connection_id, COUNT(*) AS n FROM usage_logs WHERE user_id=? AND created_at>=? GROUP BY connection_id", (user_id, since))}
+        rank = {c.employee.id: i for i, c in enumerate(decision.ordered)}
+        with self._inflight_guard:
+            busy = dict(self._inflight)
+
+        def band(c):
+            return 0 if quality or c.employee.cost_tier <= 1 else c.employee.cost_tier
+
+        viable = sorted((c for c in decision.ordered if c.viable),
+                        key=lambda c: (c.employee.id in avoid, band(c), busy.get(c.employee.id, 0), recent.get(c.employee.id, 0), rank[c.employee.id]))
+        tail = sorted((c for c in decision.ordered if not c.viable), key=lambda c: (c.employee.id in avoid, rank[c.employee.id]))
+        return viable + tail
+
+    def _busy(self, connection_id: str, delta: int) -> None:
+        with self._inflight_guard:
+            self._inflight[connection_id] = max(0, self._inflight.get(connection_id, 0) + delta)
 
     def _adapter(self, conn, user_id, row, entry):
         secret = vault.reveal(conn, user_id, row["credential_id"]) if row["credential_id"] else None
@@ -247,6 +377,13 @@ class Factory:
         """After a restart nothing is really running: interrupted tasks go back to the queue, and
         connections stuck on a non-chat or unlisted model are moved to a served chat model."""
         tasks = conn.execute("UPDATE tasks SET status='ready' WHERE status='in_progress'").rowcount
+        meetings = conn.execute("SELECT id, user_id FROM projects WHERE status='ideating'").fetchall()
+        for p in meetings:
+            conn.execute("DELETE FROM ideas WHERE project_id=? AND id NOT IN (SELECT idea_id FROM production_lines)", (p["id"],))
+            if self.background_ideation:
+                self._start_ideation(p["user_id"], p["id"])
+            else:
+                conn.execute("UPDATE projects SET status='failed' WHERE id=?", (p["id"],))
         fixed = 0
         for row in conn.execute("SELECT * FROM provider_connections").fetchall():
             entry = catalog.provider(self.catalog_dir, row["catalog_id"])
@@ -262,7 +399,9 @@ class Factory:
     def execute(self, conn, user_id, line_id, task: dict, ctx: TaskContext, policy: str) -> tuple[str, str, str]:
         """Returns (text, connection_id, worker_name). Raises AllProvidersFailed when stuck."""
         team = self.employees(conn, user_id)
-        rtask = routing.Task(kind=task["kind"], difficulty=task["difficulty"], critical=bool(task["critical"]))
+        # Game code and gate decisions need the strongest models: raise the bar so weak AIs only get them as a last resort.
+        quality = bool(ctx.game_task or ctx.judge)
+        rtask = routing.Task(kind=task["kind"], difficulty=max(task["difficulty"], 3) if quality else task["difficulty"], critical=bool(task["critical"]) or quality)
         decision = routing.route(rtask, [e for e, _, _ in team], policy=policy)
         if not decision.ordered and task["kind"] in FALLBACK_KIND and team:
             capable_cooling = any(e.cooldown_until > _now().timestamp() and e.skills.get(task["kind"], 0) > 0 for e, _, _ in team)
@@ -276,8 +415,12 @@ class Factory:
                 rtask.kind = sub
                 decision = routing.route(rtask, [e for e, _, _ in team], policy=policy)
         by_id = {e.id: (row, entry) for e, row, entry in team}
+        avoid = set()
+        if task["task_key"].startswith("rewrite"):
+            # a rewrite goes to a different AI than the ones whose game kept failing
+            avoid = {r["connection_id"] for r in conn.execute("SELECT connection_id FROM tasks WHERE stage_id=? AND connection_id IS NOT NULL", (task["stage_id"],))}
         candidates = []
-        for c in decision.ordered:
+        for c in self._order(conn, user_id, decision, quality=quality, avoid=avoid):
             row, entry = by_id[c.employee.id]
             try:
                 candidates.append((c.employee.id, c.employee.name, self._adapter(conn, user_id, row, entry)))
@@ -285,6 +428,8 @@ class Factory:
                 continue
         request = build_prompt(ctx)
         if candidates:
+            first = candidates[0][0]
+            self._busy(first, +1)
             try:
                 text, attempts = run_with_failover(candidates, request)
                 self._record_attempts(conn, user_id, line_id, task["id"], attempts, rtask)
@@ -295,6 +440,8 @@ class Factory:
                 self._record_attempts(conn, user_id, line_id, task["id"], exc.attempts, rtask)
                 if not self.simulate:
                     raise
+            finally:
+                self._busy(first, -1)
         elif not self.simulate:
             raise AllProvidersFailed([])
         return simulate(ctx), SIM_ID, SIM_NAME
@@ -332,7 +479,7 @@ class Factory:
         )
 
     def _context(self, conn, line, stage_def, task) -> TaskContext:
-        idea = conn.execute("SELECT i.*, p.platform FROM ideas i JOIN projects p ON p.id=i.project_id WHERE i.id=?", (line["idea_id"],)).fetchone()
+        idea = conn.execute("SELECT i.*, p.platform, p.research FROM ideas i JOIN projects p ON p.id=i.project_id WHERE i.id=?", (line["idea_id"],)).fetchone()
         deps = conn.execute(
             "SELECT a.path, a.content FROM task_dependencies d JOIN artifacts a ON a.task_id=d.depends_on WHERE d.task_id=?", (task["id"],)
         ).fetchall()
@@ -353,6 +500,7 @@ class Factory:
             dependencies={path: content or "" for path, content in deps}, feedback=feedback,
             judge=self._is_judge(stage_def, task), concept=json.loads(idea["concept"]) if idea["concept"] else None,
             dossier=self._dossier(conn, line, stage_def),
+            research=market.as_text(json.loads(idea["research"]) if idea["research"] else None, 2500),
         )
 
     DOSSIER_PRIORITY = ("GDD.md", "core-loop.md", "economy.md", "architecture.md", "ux-flow.md", "art-bible.md", "production-backlog.json",
@@ -416,10 +564,10 @@ class Factory:
     def current_game(self, ws: LineWorkspace, line) -> str:
         """The canonical game on main; falls back to the family template until one exists."""
         html = ws.read(GAME_PATH)
-        return html if html and games.smoke_test(html)["passed"] else self._template_game(line)
+        return html if html and games.smoke_test(html)["passed"] else games.mark_fallback(self._template_game(line))
 
     def _is_game_task(self, stage_def, task) -> bool:
-        if task["task_key"].startswith(("ceo-", "runtime-fix")) or (task["repair_of"] and task["kind"] == "debugging"):
+        if task["task_key"].startswith(("ceo-", "runtime-fix", "rewrite")) or (task["repair_of"] and task["kind"] == "debugging"):
             return True
         return any(t["id"] == task["task_key"] and t.get("game") for t in stage_def["tasks"])
 
@@ -435,7 +583,8 @@ class Factory:
                 ctx.game_task = True
                 existing = ws.read(GAME_PATH)
                 # The emergency template is never handed to the AI as "the game": it would just edit it.
-                usable = existing and games.smoke_test(existing)["passed"] and not games.is_fallback(existing)
+                usable = (existing and games.smoke_test(existing)["passed"] and not games.is_fallback(existing)
+                          and not task["task_key"].startswith("rewrite"))
                 ctx.game_source = existing if usable else None
             if task["kind"] == "vision":
                 shot = runtime_qa.run(self.current_game(ws, line))
@@ -472,16 +621,24 @@ class Factory:
         files = {path: body}
         if res["game_task"]:
             generated = extract_game(text) if connection_id != SIM_ID else None
+            patched = False
+            if not generated and connection_id != SIM_ID:
+                base = ws.read(GAME_PATH)
+                if base and not games.is_fallback(base):
+                    generated = games.apply_patch(base, text)  # the worker answered with a diff: apply it
+                    patched = bool(generated)
             if generated:
                 generated = games.normalize(generated)
             similarity = games.template_similarity(generated, self.catalog_dir) if generated else 0.0
             if generated and games.smoke_test(generated)["passed"] and similarity < 0.7:
                 files[GAME_PATH] = generated
-                self.log(conn, user_id, "GAME UPDATE", f"{line['title']} · {worker}가 게임 코드 작성/갱신 ({len(generated):,} bytes)", line["id"])
+                self.log(conn, user_id, "GAME UPDATE", f"{line['title']} · {worker}가 게임 코드 {'수정(diff 적용)' if patched else '작성/갱신'} ({len(generated):,} bytes)", line["id"])
             else:
                 if generated:
                     reason = "기본 템플릿을 거의 그대로 반환" if similarity >= 0.7 else "필수 요소(startGame 등) 누락"
                     self.log(conn, user_id, "GAME REJECTED", f"{line['title']} · {worker} 결과 거부: {reason} → 이전 게임 유지", line["id"])
+                elif connection_id != SIM_ID:
+                    self.log(conn, user_id, "GAME REJECTED", f"{line['title']} · {worker} 결과에 완성된 HTML이나 적용 가능한 diff가 없음 → 이전 게임 유지", line["id"])
                 current = ws.read(GAME_PATH)
                 if current is None:
                     files[GAME_PATH] = games.mark_fallback(self._template_game(line))  # keeps main playable; not an AI base
@@ -539,15 +696,22 @@ class Factory:
             ws.ensure(line["title"])
             html = self.current_game(ws, line)
             smoke = games.smoke_test(html)
-            conn.commit()  # runtime QA drives a browser for seconds: release the write lock first
-            runtime = runtime_qa.run(html) if smoke["passed"] else {"status": "failed", "checks": [], "errors": ["static smoke failed"], "screenshot": None}
+            ai_game = not games.is_fallback(html)
+            if not ai_game and self._has_real_ai(conn, user_id):
+                # AIs are connected but none of their games made it: the template is never shipped as their work
+                runtime = {"status": "failed", "checks": [], "errors": ["AI가 만든 동작하는 게임이 아직 없음"], "screenshot": None}
+            else:
+                conn.commit()  # runtime QA drives a browser for seconds: release the write lock first
+                runtime = runtime_qa.run(html) if smoke["passed"] else {"status": "failed", "checks": [], "errors": ["static smoke failed"], "screenshot": None}
             if runtime["status"] == "failed":
-                if self._runtime_repair(conn, user_id, line, stage_def, stage_row, runtime):
+                if ai_game and self._runtime_repair(conn, user_id, line, stage_def, stage_row, runtime):
                     return  # stage stays open until the repair task passes the gate
-                html = self._template_game(line)
-                ws.commit_on_main({GAME_PATH: html}, "revert: restore the safe template game after failed runtime QA", "AI Factory Leader")
-                self.log(conn, user_id, "RUNTIME REVERT", f"{line['title']} · 자동 수정 {MAX_RUNTIME_FIXES}회 실패 → 안전한 템플릿 게임으로 복구", line["id"])
+                restored = self._recover_game(conn, user_id, line, stage_def, stage_row, runtime, ws)
+                if restored is None:
+                    return  # a rewrite task is open, or the line is paused for the CEO
+                html = restored
                 smoke = games.smoke_test(html)
+                conn.commit()
                 runtime = runtime_qa.run(html)
             version = stage_def["build"]
             files = {f"builds/v{version}/index.html": html}
@@ -578,6 +742,52 @@ class Factory:
             self._advance(conn, user_id, line)
         # Nothing goes to GitHub while the game is in production: builds are played from the
         # console, and the repository + Pages link are made once the CEO approves the release.
+
+    def _has_real_ai(self, conn, user_id) -> bool:
+        return any(e.status == "online" for e, _, _ in self.employees(conn, user_id))
+
+    def _recover_game(self, conn, user_id, line, stage_def, stage_row, runtime, ws) -> str | None:
+        """After the fix budget: go back to the last AI game that passed runtime QA; otherwise have a
+        different, stronger AI rewrite it from scratch; otherwise pause the line for the CEO.
+        Returns the restored game, or None when the stage stays open / the line is paused."""
+        for r in conn.execute(
+            """SELECT a.content, b.version FROM builds b JOIN artifacts a ON a.line_id=b.line_id AND a.path='builds/v'||b.version||'/index.html'
+               WHERE b.line_id=? AND b.runtime_status='passed' ORDER BY b.created_at DESC, b.rowid DESC, a.id DESC""", (line["id"],)).fetchall():
+            if r["content"] and not games.is_fallback(r["content"]):
+                ws.commit_on_main({GAME_PATH: r["content"]}, f"revert: restore AI game v{r['version']} after failed runtime QA", "AI Factory Leader")
+                self.log(conn, user_id, "RUNTIME ROLLBACK", f"{line['title']} · 수정 실패 → 마지막으로 통과한 AI 게임 v{r['version']}로 되돌림", line["id"])
+                return r["content"]
+        done = conn.execute("SELECT COUNT(*) FROM tasks WHERE stage_id=? AND task_key LIKE 'rewrite%'", (stage_row["id"],)).fetchone()[0]
+        if done < MAX_REWRITES and self._has_real_ai(conn, user_id):
+            report = json.dumps({"checks": runtime["checks"], "errors": runtime["errors"]}, ensure_ascii=False, indent=2)
+            conn.execute("INSERT INTO artifacts(line_id, stage_key, path, content) VALUES (?,?,?,?)", (line["id"], stage_def["id"], f"qa/runtime-{stage_def['id']}-rewrite{done + 1}.json", report))
+            conn.execute(
+                "INSERT INTO tasks(id, line_id, stage_id, task_key, name, role, kind, difficulty, critical, artifact, status) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (_id("tsk"), line["id"], stage_row["id"], f"rewrite{done + 1}", "게임 처음부터 다시 작성", "Gameplay Programmer", "coding", 3, 1, f"rewrites/rewrite-{done + 1}.md", "ready"),
+            )
+            conn.execute("UPDATE stages SET status='in_progress', qa_status='failed', completed_at=NULL WHERE id=?", (stage_row["id"],))
+            self.log(conn, user_id, "GAME REWRITE", f"{line['title']} · 동작하는 게임이 없음 ({'; '.join(runtime['errors'][:1])}) → 다른 AI에게 처음부터 다시 작성 지시 {done + 1}/{MAX_REWRITES}", line["id"])
+            return None
+        conn.execute("UPDATE production_lines SET status='paused', leader_state='blocked', leader_decision=? WHERE id=?",
+                     ("AI들이 동작하는 게임을 만들지 못함 · 더 강한 AI를 연결하거나 수정 지시 후 재개", line["id"]))
+        self.log(conn, user_id, "LINE PAUSED", f"{line['title']} · 자동 수정·재작성 모두 실패 → 라인 일시정지 (더 강한 AI 연결 또는 CEO 수정 지시 필요)", line["id"])
+        return None
+
+    def resume_blocked(self, conn, user_id, line_id) -> None:
+        """Resuming a line the Leader paused for lack of a working game grants one more rewrite."""
+        line = conn.execute("SELECT * FROM production_lines WHERE id=? AND user_id=?", (line_id, user_id)).fetchone()
+        if line is None or line["leader_state"] != "blocked":
+            return
+        stage_def = self.stages[line["stage_index"]]
+        stage_row = self._stage_row(conn, line_id, stage_def["id"])
+        if stage_row is None:
+            return
+        conn.execute(
+            "INSERT INTO tasks(id, line_id, stage_id, task_key, name, role, kind, difficulty, critical, artifact, status) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (_id("tsk"), line_id, stage_row["id"], f"rewrite-r{secrets.token_hex(2)}", "게임 처음부터 다시 작성 (재개)", "Gameplay Programmer", "coding", 3, 1, "rewrites/rewrite-resume.md", "ready"),
+        )
+        conn.execute("UPDATE stages SET status='in_progress', completed_at=NULL WHERE id=?", (stage_row["id"],))
+        conn.execute("UPDATE production_lines SET leader_state='dispatching', leader_decision='재개 · 게임 재작성' WHERE id=?", (line_id,))
 
     def _runtime_repair(self, conn, user_id, line, stage_def, stage_row, runtime) -> bool:
         """Opens a runtime-fix game task for a failed build. False once the retry budget is spent."""
@@ -652,6 +862,10 @@ class Factory:
         → one clean release commit → push → Pages → the link is shown only after it answers 200."""
         ws = self.workspace(user_id, line["id"])
         ws.ensure(line["title"])
+        if games.is_fallback(self.current_game(ws, line)):
+            self._publication(conn, line["id"], kind="release", status="failed", version=version, detail="no AI-made game: the emergency template is never published")
+            self.log(conn, user_id, "PUBLISH BLOCKED", f"{line['title']} · AI가 만든 게임이 없어 배포하지 않음 (비상용 템플릿은 GitHub에 올리지 않습니다)", line["id"])
+            return {"status": "no_game"}
         files = self._release_files(conn, ws, line, version)
         message = f"release: v{version} {line['title']}"
         conn.commit()  # no DB write lock is held during git and network I/O
@@ -737,7 +951,8 @@ class Factory:
         if stage_row is None:
             stage_row = self._instantiate(conn, line, stage_def)
         self._refresh(conn, stage_row["id"])
-        ready = self._select_wave(conn, stage_def, stage_row, s["workers_per_line"])
+        online = sum(1 for e, _, _ in self.employees(conn, user_id) if e.status == "online")
+        ready = self._select_wave(conn, stage_def, stage_row, max(s["workers_per_line"], min(MAX_WAVE, online)))
         if ready:
             names = ", ".join(t["name"] for t in ready)
             conn.execute("UPDATE production_lines SET leader_state='dispatching', leader_decision=? WHERE id=?", (f"{stage_def['name']} · 병렬 {len(ready)}: {names}"[:300], line_id))

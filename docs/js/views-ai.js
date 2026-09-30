@@ -67,15 +67,33 @@ export function team(app) {
     '<section class="panel"><div class="panelHead"><div><div class="eyebrow">AI EMPLOYEES</div><h2>실제 연결 AI ' + realCount(state) + "명 · 전체 " + state.employees.length + "명</h2>" +
     '<p class="muted">라우팅 정책: <strong>' + esc(state.settings.policy) + "</strong> · 예약선 이하 AI는 critical 작업에만 배정 · 모든 외부 AI가 막히면 Local Worker가 공장을 유지합니다.</p></div>" +
     '<button class="btn primary" data-action="tab" data-id="market">+ AI 추가</button></div>' +
-    '<div class="employeeGrid">' + cards.join("") + "</div></section>"
+    '<div class="employeeGrid">' + cards.join("") + "</div></section>" +
+    searchPanel(state)
+  );
+}
+
+function searchPanel(state) {
+  if (state.user.mode !== "backend") return "";
+  const tools = state.searchTools || [];
+  return (
+    '<section class="panel"><div class="panelHead"><div><div class="eyebrow">MARKET RESEARCH TOOLS</div><h2>검색 API ' + tools.length + "개</h2>" +
+    '<p class="muted">아이디어 회의 전에 주제의 인기 트렌드·플레이어 불만·포화된 아이디어를 웹에서 조사해 AI들에게 제공합니다.</p></div>' +
+    '<button class="btn" data-action="market-search">+ 검색 연결</button></div>' +
+    (tools.length
+      ? '<ul class="plainList">' + tools.map((t) => "<li><div><strong>" + esc(t.name) + "</strong><small>" + esc(t.vendor) + " · 사용 " + fmtNum(t.used) +
+          (t.limit ? " / " + fmtNum(t.limit) + (t.window === "month" ? "/월" : "") : "") + (t.lastError ? " · 오류: " + esc(t.lastError) : "") + "</small></div>" +
+          pill(t.status) + '<button class="btn small" data-action="tool-verify" data-id="' + esc(t.id) + '">재검증</button>' +
+          '<button class="btn small danger" data-action="tool-remove" data-id="' + esc(t.id) + '">삭제</button></li>').join("") + "</ul>"
+      : '<p class="notice">검색 API가 연결되지 않았습니다. 지금은 AI들이 자기 학습 지식만으로 발상합니다. Tavily(무료 월 1,000회)를 추천합니다.</p>') +
+    "</section>"
   );
 }
 
 // ---------- marketplace ----------
 
 const FILTERS = [
-  ["recommended", "추천"], ["installed", "설치됨"], ["free", "무료"], ["coding", "코딩"], ["planning", "기획"],
-  ["vision", "비전"], ["image", "이미지"], ["audio", "오디오"], ["local", "로컬"], ["login", "로그인 필요"], ["all", "전체"],
+  ["all", "전체"], ["recommended", "추천"], ["installed", "설치됨"], ["free", "무료"], ["paid", "유료"], ["search", "검색"],
+  ["coding", "코딩"], ["planning", "기획"], ["vision", "비전"], ["image", "이미지"], ["audio", "오디오"], ["local", "로컬"], ["login", "로그인 필요"],
 ];
 
 function matches(p, filter, installed) {
@@ -83,7 +101,9 @@ function matches(p, filter, installed) {
     case "all": return true;
     case "recommended": return p.recommended;
     case "installed": return installed;
-    case "free": return p.free;
+    case "free": return p.free && p.kind !== "search";
+    case "paid": return !p.free;
+    case "search": return p.kind === "search";
     case "login": return p.requires_login;
     default: return p.categories.includes(filter);
   }
@@ -91,13 +111,13 @@ function matches(p, filter, installed) {
 
 export function market(app) {
   const { state, ctx } = app;
-  const filter = app.ui.marketFilter || "recommended";
-  const installedIds = new Set(state.employees.map((e) => e.catalogId));
+  const filter = app.ui.marketFilter || "all";
+  const installedIds = new Set(state.employees.map((e) => e.catalogId).concat((state.searchTools || []).map((t) => t.catalogId)));
   const list = ctx.providers.filter((p) => matches(p, filter, installedIds.has(p.id)));
   const backend = state.user.mode === "backend";
   return (
     '<section class="panel"><div class="panelHead"><div><div class="eyebrow">AI MARKETPLACE · catalog ' + esc(ctx.catalogUpdated) + "</div><h2>AI 플러그인 마켓</h2>" +
-    '<p class="muted">+ AI 추가 → Provider Adapter 설치 → 인증(OAuth · API key · Local · Custom endpoint). ' +
+    '<p class="muted">+ AI 추가 → Provider Adapter 설치 → 인증(OAuth · API key · Local · Custom endpoint). 무료 AI부터 내가 결제한 유료 AI, 시장 조사용 검색 API까지 연결할 수 있습니다. 연결된 AI는 모두 골고루 작업에 배치됩니다. ' +
     (backend ? "자격증명은 백엔드 암호화 Vault에만 저장되고 브라우저에는 참조값만 남습니다." : "현재 프리뷰 모드: 실제 자격증명은 받지 않으며 시뮬레이션 사원으로 설치됩니다.") + "</p></div></div>" +
     '<div class="filters" role="tablist">' + FILTERS.map(([id, label]) => {
       const count = ctx.providers.filter((p) => matches(p, id, installedIds.has(p.id))).length;
@@ -108,14 +128,14 @@ export function market(app) {
       return (
         '<article class="provider">' +
         '<div class="empHead"><div><strong>' + esc(p.name) + "</strong><small>" + esc(p.vendor) + " · " + esc(p.default_model || "") + "</small></div>" +
-        (p.free ? '<span class="pill good">' + (p.cost_tier === 0 ? "LOCAL" : "FREE") + "</span>" : '<span class="pill warn">PAID</span>') + "</div>" +
+        (p.kind === "search" ? '<span class="pill info">SEARCH</span>' : p.free ? '<span class="pill good">' + (p.cost_tier === 0 ? "LOCAL" : "FREE") + "</span>" : '<span class="pill warn">유료</span>') + "</div>" +
         "<p>" + esc(p.summary) + "</p>" +
         '<div class="chips">' + p.categories.map((c) => '<span class="chip">' + esc(c) + "</span>").join("") + p.auth_types.map((a) => '<span class="chip outline">' + esc(a) + "</span>").join("") + "</div>" +
-        '<dl class="facts compact"><div><dt>무료량</dt><dd>' + (p.quota.limit ? fmtNum(p.quota.limit) + " " + esc(p.quota.unit) + "/" + esc(p.quota.window) : esc(p.quota.unit)) + "</dd></div>" +
+        '<dl class="facts compact"><div><dt>' + (p.free ? "무료량" : "과금") + "</dt><dd>" + (!p.free ? "사용량만큼 (내 결제)" : p.quota.limit ? fmtNum(p.quota.limit) + " " + esc(p.quota.unit) + "/" + (p.quota.window === "once" ? "가입 시 1회" : esc(p.quota.window)) : esc(p.quota.unit)) + "</dd></div>" +
         "<div><dt>출처</dt><dd>" + esc(p.quota_source) + "</dd></div><div><dt>검증</dt><dd>" + (p.last_verified ? esc(p.last_verified) : "미검증") + "</dd></div>" +
         "<div><dt>어댑터</dt><dd>" + esc(p.adapter) + (p.adapter_status === "planned" ? " (예정)" : "") + "</dd></div></dl>" +
         '<div class="actions">' +
-        (installed ? '<button class="btn" disabled>설치됨</button>' : '<button class="btn primary" data-action="connect" data-id="' + esc(p.id) + '">+ AI 추가</button>') +
+        (installed ? '<button class="btn" disabled>설치됨</button>' : '<button class="btn primary" data-action="connect" data-id="' + esc(p.id) + '">' + (p.kind === "search" ? "+ 검색 연결" : "+ AI 추가") + "</button>") +
         (p.docs_url ? '<a class="btn ghost" href="' + esc(p.docs_url) + '" target="_blank" rel="noopener">문서 ↗</a>' : "") +
         "</div></article>"
       );
@@ -137,10 +157,13 @@ export function connectModal(app, providerId) {
 
   let body = "";
   if (result) {
-    body = result.ok
+    body = result.ok && p.kind === "search"
+      ? '<div class="deploy live"><span class="pill good">연결 완료 · 실제 검색</span><strong>' + esc(p.name) + "</strong>" +
+        '<p class="muted small">서버가 키를 암호화 Vault에 저장하고 실제 검색 1회로 확인했습니다. 이제 새 주제를 넣으면 AI 회의 전에 웹 시장 조사를 먼저 합니다.</p></div>'
+      : result.ok
       ? '<div class="deploy live"><span class="pill good">연결 완료 · 실제 AI</span><strong>' + esc(p.name) + "</strong>" +
         '<p class="muted small">서버가 키를 암호화 Vault에 저장하고 실제로 호출해 확인했습니다.</p>' +
-        '<dl class="facts compact"><div><dt>사용 가능 모델</dt><dd>' + (result.models || []).length + "개</dd></div>" +
+        '<dl class="facts compact"><div><dt>사용 모델</dt><dd>' + esc(result.model || "-") + " (" + (result.models || []).length + "개 중)</dd></div>" +
         "<div><dt>쿼터</dt><dd>" + (result.quotaLimit ? fmtNum(result.quotaLimit - (result.quotaUsed || 0)) + " / " + fmtNum(result.quotaLimit) + " " + esc(result.quotaUnit || "") : "확인 불가") + "</dd></div>" +
         "<div><dt>Vault 참조</dt><dd>" + esc(result.credentialRef || "-") + "</dd></div>" +
         "<div><dt>키 지문</dt><dd>" + esc(result.fingerprint || "-") + "</dd></div></dl></div>"
@@ -158,6 +181,11 @@ export function connectModal(app, providerId) {
       (auth === "custom_endpoint" || needsAccount
         ? "<label>" + (needsAccount ? "② Account ID" : "Base URL") + '<input name="endpoint" placeholder="' + (needsAccount ? "Cloudflare account id" : "https://my-gateway.example.com/v1") + '"></label>'
         : "") +
+      (!p.free
+        ? '<p class="notice">유료 AI입니다. 이 키로 한 호출은 내 ' + esc(p.vendor) + " 계정에 과금됩니다. 공장은 무료 AI를 먼저 쓰고, 게임 코드·심사처럼 품질이 중요한 작업에 유료 AI를 섞어 씁니다. 언제든 AI 사원 화면에서 배정 중지·삭제할 수 있습니다.</p>" +
+          '<label>사용할 모델 (비우면 추천 모델 자동 선택)<input name="model" list="models-' + esc(p.id) + '" placeholder="' + esc(p.default_model || (p.preferred_models || [])[0] || "") + '"></label>' +
+          '<datalist id="models-' + esc(p.id) + '">' + (p.preferred_models || []).map((m) => '<option value="' + esc(m) + '">').join("") + "</datalist>"
+        : "") +
       "<label>② 발급받은 API Key 붙여넣기" + '<input name="api_key" type="password" autocomplete="off" data-prefix="' + esc(p.key_prefix || "") + '" ' +
       (backend ? 'placeholder="' + esc(p.key_prefix ? p.key_prefix + "… 로 시작" : "API key") + '"' : 'disabled placeholder="프리뷰 모드에서는 키를 받지 않습니다"') + "></label>" +
       '<p class="muted small" data-key-hint></p>' +
@@ -173,7 +201,7 @@ export function connectModal(app, providerId) {
       : "가짜(시뮬레이션)로 추가";
   return (
     '<div class="modal" role="dialog" aria-modal="true" aria-label="' + esc(p.name) + ' 연결"><form class="sheet" data-form="connect" data-id="' + esc(p.id) + '">' +
-    '<div class="panelHead"><div><div class="eyebrow">+ AI 추가 · ' + esc(p.adapter) + " adapter</div><h2>" + esc(p.name) + "</h2></div>" +
+    '<div class="panelHead"><div><div class="eyebrow">' + (p.kind === "search" ? "+ 검색 API 연결" : "+ AI 추가") + " · " + esc(p.adapter) + " adapter</div><h2>" + esc(p.name) + "</h2></div>" +
     '<button type="button" class="btn small" data-action="close-modal">닫기</button></div>' +
     '<ol class="steps">' + step(1, auth === "oauth" ? "로그인" : "로그인·키 발급", stepState(1)) + step(2, auth === "oauth" ? "승인" : "키 입력", stepState(2)) +
     step(3, "서버 검증", stepState(3)) + step(4, "완료", result && result.ok ? "on" : "") + "</ol>" +

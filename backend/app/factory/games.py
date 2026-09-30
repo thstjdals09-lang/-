@@ -70,3 +70,53 @@ def template_similarity(html: str, catalog_dir: Path) -> float:
             tpl = {l.strip() for l in path.read_text(encoding="utf-8").splitlines() if len(l.strip()) > 20}
             best = max(best, len(lines & tpl) / len(lines))
     return best
+
+
+_DIFF_FENCE = re.compile(r"```(?:diff|patch|html)?[^\n]*\n(.*?)```", re.S)
+
+
+def apply_patch(source: str, text: str) -> str | None:
+    """Applies the unified diff in `text` to `source`. Hunks are located by their content, not their
+    line numbers (models get those wrong), with a whitespace-tolerant fallback. None if any hunk
+    cannot be placed, so a half-applied game never reaches main."""
+    body = next((b for b in _DIFF_FENCE.findall(text or "") if "@@" in b), None)
+    if body is None:
+        body = text if "@@" in (text or "") else None
+    if not body:
+        return None
+    chunks = re.split(r"^@@[^\n]*$", body, flags=re.M)[1:]
+    out, applied = source, 0
+    for chunk in chunks:
+        before, after = [], []
+        for line in chunk.strip("\n").split("\n"):
+            if line.startswith("\\") or line.startswith(("--- ", "+++ ", "diff --git", "index ")):
+                continue
+            tag, rest = line[:1], line[1:]
+            if tag == "-":
+                before.append(rest)
+            elif tag == "+":
+                after.append(rest)
+            else:  # context (models often drop the leading space)
+                ctx = rest if tag == " " else line
+                before.append(ctx)
+                after.append(ctx)
+        while before and after and not before[-1].strip() and not after[-1].strip():
+            before.pop()
+            after.pop()
+        if not "".join(before).strip():
+            continue  # pure insertion without an anchor: cannot be placed safely
+        old, new = "\n".join(before), "\n".join(after)
+        if old in out:
+            out = out.replace(old, new, 1)
+            applied += 1
+            continue
+        lines, want = out.split("\n"), [l.strip() for l in before]
+        for i in range(len(lines) - len(want) + 1):
+            if [l.strip() for l in lines[i:i + len(want)]] == want:
+                lines[i:i + len(want)] = after
+                out = "\n".join(lines)
+                applied += 1
+                break
+        else:
+            return None
+    return out if applied else None

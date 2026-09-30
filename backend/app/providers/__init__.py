@@ -18,15 +18,17 @@ from .base import (
     classify_error,
 )
 from .gemini import GeminiAdapter
-from .openai_compat import CloudflareAdapter, OpenAICompatibleAdapter, OpenRouterAdapter
+from .anthropic import AnthropicAdapter
+from .openai_compat import CloudflareAdapter, OpenAIAdapter, OpenAICompatibleAdapter, OpenRouterAdapter
+from .search import SearchAdapter, SearchHit
 
 __all__ = [
     "ErrorInfo", "ExecuteRequest", "ExecuteResult", "HealthResult", "ProviderAdapter", "ProviderError",
-    "QuotaInfo", "Usage", "classify_error", "build_adapter", "AdapterUnavailable", "choose_model",
+    "QuotaInfo", "Usage", "classify_error", "build_adapter", "AdapterUnavailable", "choose_model", "SearchAdapter", "SearchHit",
 ]
 
 
-NON_CHAT = re.compile(r"(tts|whisper|orpheus|guard|embed|image|imagen|audio|transcrib|moderation|rerank|veo|lyria|live|robotics|computer-use)", re.I)
+NON_CHAT = re.compile(r"(tts|whisper|orpheus|guard|embed|image|imagen|audio|transcrib|moderation|rerank|veo|lyria|live|robotics|computer-use|realtime|dall-e|davinci|babbage|codex|search-preview|sora)", re.I)
 
 
 def choose_model(entry: dict, models: list[str], exclude: set[str] | None = None) -> str | None:
@@ -60,7 +62,11 @@ def build_adapter(entry: dict, *, secret: str | None = None, endpoint: str | Non
         raise AdapterUnavailable(f"{entry['id']} adapter is planned")
     model = model or entry.get("default_model")
     # Local models on consumer GPUs can take minutes to write a whole game.
-    timeout = 900 if "local" in entry.get("auth_types", []) else 120
+    timeout = 900 if "local" in entry.get("auth_types", []) else 300 if entry.get("cost_tier", 1) >= 2 else 120
+    if adapter == "search":
+        return SearchAdapter(api=entry["search_api"], base_url=entry["base_url"], secret=secret, transport=transport)
+    if adapter == "anthropic":
+        return AnthropicAdapter(base_url=entry["base_url"], secret=secret, model=model, transport=transport, timeout=300)
     if adapter == "gemini":
         return GeminiAdapter(base_url=entry["base_url"], secret=secret, model=model, transport=transport, timeout=timeout)
     if adapter == "cloudflare":
@@ -69,6 +75,6 @@ def build_adapter(entry: dict, *, secret: str | None = None, endpoint: str | Non
         base_url = endpoint or entry.get("base_url")
         if not base_url:
             raise ValueError("endpoint is required for " + entry["id"])
-        cls = OpenRouterAdapter if entry["id"] == "openrouter" else OpenAICompatibleAdapter
+        cls = {"openrouter": OpenRouterAdapter, "openai": OpenAIAdapter}.get(entry.get("flavor") or entry["id"], OpenAICompatibleAdapter)
         return cls(base_url=base_url, secret=secret, model=model, transport=transport, timeout=timeout)
     raise AdapterUnavailable(f"no adapter for {adapter}")

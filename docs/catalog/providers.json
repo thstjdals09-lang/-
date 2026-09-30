@@ -731,16 +731,17 @@
     },
     {
       "id": "anthropic",
-      "name": "Claude Reviewer (paid)",
+      "name": "Claude (유료)",
       "vendor": "Anthropic",
       "adapter": "anthropic",
-      "adapter_status": "planned",
+      "adapter_status": "available",
       "auth_types": [
         "api_key"
       ],
       "base_url": "https://api.anthropic.com/v1",
       "default_model": "claude-sonnet-5",
       "categories": [
+        "paid",
         "coding",
         "planning",
         "vision"
@@ -765,25 +766,472 @@
         "vision"
       ],
       "quota": {
-        "unit": "credits",
-        "limit": 20,
-        "window": "month",
-        "default_reserve": 0.25
+        "unit": "unlimited",
+        "limit": null,
+        "window": null,
+        "default_reserve": 0
       },
-      "quota_source": "user_budget",
+      "quota_source": "pay_as_you_go",
       "last_verified": null,
       "docs_url": "https://docs.anthropic.com",
-      "summary": "유료. 무료 AI로 품질 기준을 못 넘는 최고 난이도 리뷰·디버깅에만 사용.",
+      "summary": "내 Anthropic 결제 키로 Claude 사용. 쓴 만큼 Anthropic에 과금됩니다.",
       "key_url": "https://console.anthropic.com/settings/keys",
       "key_prefix": "sk-ant-",
       "key_steps": [
-        "Anthropic Console 로그인 (유료)",
-        "API Keys에서 키 생성",
-        "아래에 붙여넣기 (sk-ant-…)"
+        "Anthropic Console 로그인 (결제수단·크레딧 필요)",
+        "API Keys → Create Key",
+        "아래에 붙여넣기 (sk-ant-…로 시작)"
       ],
       "preferred_models": [
         "claude-sonnet",
         "claude-opus"
+      ]
+    },
+    {
+      "adapter": "openai_compatible",
+      "adapter_status": "available",
+      "auth_types": [
+        "api_key"
+      ],
+      "recommended": false,
+      "free": false,
+      "cost_tier": 3,
+      "requires_login": true,
+      "speed": 70,
+      "reliability": 94,
+      "modalities": [
+        "text",
+        "vision"
+      ],
+      "quota": {
+        "unit": "unlimited",
+        "limit": null,
+        "window": null,
+        "default_reserve": 0
+      },
+      "quota_source": "pay_as_you_go",
+      "last_verified": null,
+      "id": "openai",
+      "name": "OpenAI GPT (유료)",
+      "vendor": "OpenAI",
+      "flavor": "openai",
+      "base_url": "https://api.openai.com/v1",
+      "default_model": "gpt-5",
+      "categories": [
+        "paid",
+        "coding",
+        "planning",
+        "vision"
+      ],
+      "context_length": 400000,
+      "skills": {
+        "coding": 95,
+        "planning": 94,
+        "debugging": 94,
+        "design": 86,
+        "vision": 92,
+        "qa": 92
+      },
+      "docs_url": "https://platform.openai.com/docs/models",
+      "summary": "내 OpenAI 결제 키로 GPT 모델 사용. 쓴 만큼 OpenAI에 과금됩니다.",
+      "key_url": "https://platform.openai.com/api-keys",
+      "key_prefix": "sk-",
+      "key_steps": [
+        "OpenAI Platform 로그인 (결제수단·크레딧 필요)",
+        "API keys → Create new secret key",
+        "아래에 붙여넣기 (sk-…로 시작)"
+      ],
+      "preferred_models": [
+        "gpt-5",
+        "gpt-4.1",
+        "o4-mini",
+        "gpt-4o"
+      ]
+    },
+    {
+      "adapter": "openai_compatible",
+      "adapter_status": "available",
+      "auth_types": [
+        "api_key"
+      ],
+      "recommended": false,
+      "free": false,
+      "cost_tier": 3,
+      "requires_login": true,
+      "speed": 70,
+      "reliability": 94,
+      "modalities": [
+        "text",
+        "vision"
+      ],
+      "quota": {
+        "unit": "unlimited",
+        "limit": null,
+        "window": null,
+        "default_reserve": 0
+      },
+      "quota_source": "pay_as_you_go",
+      "last_verified": null,
+      "id": "xai",
+      "name": "xAI Grok (유료)",
+      "vendor": "xAI",
+      "base_url": "https://api.x.ai/v1",
+      "default_model": "grok-4",
+      "categories": [
+        "paid",
+        "coding",
+        "planning"
+      ],
+      "context_length": 256000,
+      "skills": {
+        "coding": 91,
+        "planning": 90,
+        "debugging": 89,
+        "design": 70,
+        "vision": 80,
+        "qa": 86
+      },
+      "docs_url": "https://docs.x.ai",
+      "summary": "내 xAI 결제 키로 Grok 사용. 쓴 만큼 과금됩니다.",
+      "key_url": "https://console.x.ai",
+      "key_prefix": "xai-",
+      "key_steps": [
+        "xAI Console 로그인 (크레딧 필요)",
+        "API Keys → Create API Key",
+        "아래에 붙여넣기 (xai-…로 시작)"
+      ],
+      "preferred_models": [
+        "grok-4",
+        "grok-3"
+      ]
+    },
+    {
+      "adapter": "openai_compatible",
+      "adapter_status": "available",
+      "auth_types": [
+        "api_key"
+      ],
+      "recommended": false,
+      "free": false,
+      "cost_tier": 2,
+      "requires_login": true,
+      "speed": 70,
+      "reliability": 94,
+      "modalities": [
+        "text"
+      ],
+      "quota": {
+        "unit": "unlimited",
+        "limit": null,
+        "window": null,
+        "default_reserve": 0
+      },
+      "quota_source": "pay_as_you_go",
+      "last_verified": null,
+      "id": "deepseek",
+      "name": "DeepSeek (유료·저가)",
+      "vendor": "DeepSeek",
+      "base_url": "https://api.deepseek.com",
+      "default_model": "deepseek-chat",
+      "categories": [
+        "paid",
+        "coding",
+        "planning"
+      ],
+      "context_length": 128000,
+      "skills": {
+        "coding": 90,
+        "planning": 86,
+        "debugging": 88,
+        "design": 50,
+        "vision": 0,
+        "qa": 84
+      },
+      "docs_url": "https://api-docs.deepseek.com",
+      "summary": "충전식 저가 API. 코딩 품질 대비 비용이 낮습니다.",
+      "key_url": "https://platform.deepseek.com/api_keys",
+      "key_prefix": "sk-",
+      "key_steps": [
+        "DeepSeek Platform 로그인 후 잔액 충전",
+        "API keys → Create new API key",
+        "아래에 붙여넣기 (sk-…로 시작)"
+      ],
+      "preferred_models": [
+        "deepseek-chat",
+        "deepseek-reasoner"
+      ]
+    },
+    {
+      "adapter": "gemini",
+      "adapter_status": "available",
+      "auth_types": [
+        "api_key"
+      ],
+      "recommended": false,
+      "free": false,
+      "cost_tier": 3,
+      "requires_login": true,
+      "speed": 70,
+      "reliability": 94,
+      "modalities": [
+        "text",
+        "vision"
+      ],
+      "quota": {
+        "unit": "unlimited",
+        "limit": null,
+        "window": null,
+        "default_reserve": 0
+      },
+      "quota_source": "pay_as_you_go",
+      "last_verified": null,
+      "id": "gemini-pro",
+      "name": "Gemini Pro (유료 결제 키)",
+      "vendor": "Google",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta",
+      "default_model": "gemini-2.5-pro",
+      "categories": [
+        "paid",
+        "coding",
+        "planning",
+        "vision"
+      ],
+      "context_length": 1000000,
+      "skills": {
+        "coding": 93,
+        "planning": 96,
+        "debugging": 90,
+        "design": 90,
+        "vision": 96,
+        "qa": 90
+      },
+      "docs_url": "https://ai.google.dev/gemini-api/docs/pricing",
+      "summary": "결제가 연결된 Google AI Studio 키로 Gemini Pro 사용. 쓴 만큼 과금됩니다.",
+      "key_url": "https://aistudio.google.com/app/apikey",
+      "key_prefix": "AIza",
+      "key_steps": [
+        "Google AI Studio 로그인 후 결제(Billing) 연결",
+        "Create API key",
+        "아래에 붙여넣기 (AIza…로 시작)"
+      ],
+      "preferred_models": [
+        "gemini-3-pro",
+        "gemini-2.5-pro",
+        "gemini-pro-latest"
+      ]
+    },
+    {
+      "adapter": "openai_compatible",
+      "adapter_status": "available",
+      "auth_types": [
+        "api_key"
+      ],
+      "recommended": false,
+      "free": false,
+      "cost_tier": 3,
+      "requires_login": true,
+      "speed": 70,
+      "reliability": 94,
+      "modalities": [
+        "text",
+        "vision"
+      ],
+      "quota": {
+        "unit": "unlimited",
+        "limit": null,
+        "window": null,
+        "default_reserve": 0
+      },
+      "quota_source": "pay_as_you_go",
+      "last_verified": null,
+      "id": "openrouter-paid",
+      "name": "OpenRouter 유료 모델",
+      "vendor": "OpenRouter",
+      "flavor": "openrouter",
+      "base_url": "https://openrouter.ai/api/v1",
+      "default_model": null,
+      "categories": [
+        "paid",
+        "coding",
+        "planning",
+        "vision"
+      ],
+      "context_length": 200000,
+      "skills": {
+        "coding": 94,
+        "planning": 93,
+        "debugging": 92,
+        "design": 82,
+        "vision": 88,
+        "qa": 90
+      },
+      "docs_url": "https://openrouter.ai/models",
+      "summary": "충전한 OpenRouter 크레딧으로 Claude·GPT·Gemini 등 유료 모델 사용. 무료 풀과 별도 연결입니다.",
+      "key_url": "https://openrouter.ai/settings/keys",
+      "key_prefix": "sk-or-",
+      "key_steps": [
+        "OpenRouter 로그인 후 Credits 충전",
+        "Keys → Create Key (지출 한도 설정 권장)",
+        "아래에 붙여넣기 (sk-or-…로 시작)"
+      ],
+      "preferred_models": [
+        "anthropic/claude-sonnet",
+        "openai/gpt-5",
+        "google/gemini-2.5-pro",
+        "x-ai/grok-4"
+      ]
+    },
+    {
+      "adapter": "search",
+      "adapter_status": "available",
+      "auth_types": [
+        "api_key"
+      ],
+      "default_model": null,
+      "categories": [
+        "search"
+      ],
+      "kind": "search",
+      "recommended": true,
+      "free": true,
+      "cost_tier": 1,
+      "requires_login": true,
+      "context_length": 0,
+      "speed": 90,
+      "reliability": 85,
+      "skills": {
+        "coding": 0,
+        "planning": 0,
+        "debugging": 0,
+        "design": 0,
+        "vision": 0,
+        "qa": 0
+      },
+      "modalities": [],
+      "quota_source": "seed_estimate",
+      "last_verified": null,
+      "preferred_models": [],
+      "id": "tavily",
+      "name": "Tavily 웹 검색",
+      "vendor": "Tavily",
+      "search_api": "tavily",
+      "base_url": "https://api.tavily.com",
+      "quota": {
+        "unit": "requests",
+        "limit": 1000,
+        "window": "month",
+        "default_reserve": 0
+      },
+      "docs_url": "https://docs.tavily.com/documentation/api-reference/endpoint/search",
+      "summary": "AI 에이전트용 검색 API. 주제별 시장·트렌드·플레이어 반응을 조사해 아이디어 회의에 제공합니다. 무료 월 1,000회.",
+      "key_url": "https://app.tavily.com/home",
+      "key_prefix": "tvly-",
+      "key_steps": [
+        "Tavily 가입·로그인 (Google/GitHub 계정 가능, 카드 불필요)",
+        "대시보드의 API Keys에서 기본 키 복사",
+        "아래에 붙여넣기 (tvly-…로 시작)"
+      ]
+    },
+    {
+      "adapter": "search",
+      "adapter_status": "available",
+      "auth_types": [
+        "api_key"
+      ],
+      "default_model": null,
+      "categories": [
+        "search"
+      ],
+      "kind": "search",
+      "recommended": false,
+      "free": true,
+      "cost_tier": 1,
+      "requires_login": true,
+      "context_length": 0,
+      "speed": 90,
+      "reliability": 85,
+      "skills": {
+        "coding": 0,
+        "planning": 0,
+        "debugging": 0,
+        "design": 0,
+        "vision": 0,
+        "qa": 0
+      },
+      "modalities": [],
+      "quota_source": "seed_estimate",
+      "last_verified": null,
+      "preferred_models": [],
+      "id": "brave-search",
+      "name": "Brave 웹 검색",
+      "vendor": "Brave",
+      "search_api": "brave",
+      "base_url": "https://api.search.brave.com/res/v1",
+      "quota": {
+        "unit": "requests",
+        "limit": 1000,
+        "window": "month",
+        "default_reserve": 0
+      },
+      "docs_url": "https://api-dashboard.search.brave.com/app/documentation/web-search/get-started",
+      "summary": "독립 인덱스 기반 웹 검색 API. 월 무료 크레딧 범위에서 시장 조사에 사용합니다 (가입 시 결제수단 등록이 필요할 수 있음).",
+      "key_url": "https://api-dashboard.search.brave.com/app/keys",
+      "key_prefix": "",
+      "key_steps": [
+        "Brave Search API 대시보드 가입·로그인",
+        "무료 플랜 구독 후 API Keys에서 키 생성",
+        "아래에 붙여넣기"
+      ]
+    },
+    {
+      "adapter": "search",
+      "adapter_status": "available",
+      "auth_types": [
+        "api_key"
+      ],
+      "default_model": null,
+      "categories": [
+        "search"
+      ],
+      "kind": "search",
+      "recommended": false,
+      "free": true,
+      "cost_tier": 1,
+      "requires_login": true,
+      "context_length": 0,
+      "speed": 90,
+      "reliability": 85,
+      "skills": {
+        "coding": 0,
+        "planning": 0,
+        "debugging": 0,
+        "design": 0,
+        "vision": 0,
+        "qa": 0
+      },
+      "modalities": [],
+      "quota_source": "seed_estimate",
+      "last_verified": null,
+      "preferred_models": [],
+      "id": "serper",
+      "name": "Serper (Google 검색)",
+      "vendor": "Serper",
+      "search_api": "serper",
+      "base_url": "https://google.serper.dev",
+      "quota": {
+        "unit": "requests",
+        "limit": 2500,
+        "window": "once",
+        "default_reserve": 0
+      },
+      "docs_url": "https://serper.dev",
+      "summary": "Google 검색 결과 API. 가입 시 무료 2,500회(1회성).",
+      "key_url": "https://serper.dev/api-key",
+      "key_prefix": "",
+      "key_steps": [
+        "serper.dev 가입·로그인 (Google 계정 가능)",
+        "API Key 페이지에서 키 복사",
+        "아래에 붙여넣기"
       ]
     }
   ]

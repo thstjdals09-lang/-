@@ -75,9 +75,11 @@ def test_real_providers_are_routed_with_failover_and_usage(signed_in, http):
     calls = {"groq": 0}
 
     def groq_chat(req):
-        calls["groq"] += 1
-        if calls["groq"] == 1:
-            return httpx.Response(429, text="slow down")
+        # the first production-task call is rate limited (the ideation room's calls come earlier)
+        if "# Stage" in json.loads(req.content)["messages"][-1]["content"]:
+            calls["groq"] += 1
+            if calls["groq"] == 1:
+                return httpx.Response(429, text="slow down")
         return httpx.Response(200, json={"choices": [{"message": {"content": "groq artifact\nRESULT: PASS"}}], "usage": {"prompt_tokens": 100, "completion_tokens": 50}})
 
     http.add("POST", "api.groq.com/openai/v1/chat/completions", groq_chat)
@@ -203,15 +205,16 @@ def test_model_written_game_flows_into_builds_and_windows_package(signed_in, htt
     assert ws.read("release/windows/Play.cmd").startswith("@echo off")
 
 
-def test_invalid_model_game_is_rejected_and_last_good_game_kept(signed_in, http):
+def test_invalid_model_games_are_rejected_and_never_replaced_by_the_template(signed_in, http):
     _connect(signed_in, http, "groq", "api.groq.com/openai/v1/models", {"data": [{"id": "llama"}]})
     http.add("POST", "chat/completions", _game_writer("```html\n<!doctype html><body>no marker, no entry point</body>\n```"))
     signed_in.post("/projects", json={"topic": "좀비"}, headers=CSRF)
     line_id = _lines(signed_in)[0]["id"]
     signed_in.post(f"/lines/{line_id}/run", headers=CSRF)
-    assert any(l["type"] == "GAME REJECTED" for l in signed_in.get("/logs").json())
-    builds = signed_in.get(f"/lines/{line_id}").json()["builds"]
-    assert builds and all(b["smoke"]["passed"] for b in builds)
+    types = [l["type"] for l in signed_in.get("/logs").json()]
+    assert "GAME REJECTED" in types and types.count("GAME REWRITE") == 2 and "LINE PAUSED" in types
+    detail = signed_in.get(f"/lines/{line_id}").json()
+    assert detail["status"] == "paused" and detail["builds"] == []  # no template build presented as the AI's game
 
 
 def test_wave_runs_provider_calls_in_parallel(signed_in, http):
@@ -267,7 +270,8 @@ def test_fallback_template_is_never_the_base_for_ai_game_work(signed_in, http):
     _connect(signed_in, http, "groq", "api.groq.com/openai/v1/models", {"data": [{"id": "llama"}]})
     chat, prompts = _prompt_recorder(lambda p: "```html\n<!doctype html><body>broken, no entry point</body>\n```")
     http.add("POST", "chat/completions", chat)
-    _run_to_build(signed_in, "좀비")
+    signed_in.post("/projects", json={"topic": "좀비"}, headers=CSRF)
+    signed_in.post(f"/lines/{_lines(signed_in)[0]['id']}/run", headers=CSRF)
     game_prompts = [p for p in prompts if "# Game deliverable" in p]
     assert len(game_prompts) >= 2
     assert all("No game exists yet" in p and "# Current game source" not in p for p in game_prompts)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, Response
@@ -53,6 +54,8 @@ def get_factory(app) -> Factory:
     f.transport = getattr(app.state, "http_transport", None)
     f.github = getattr(app.state, "github_sync", None)
     f.verifier = getattr(app.state, "pages_verifier", None)
+    # With the autopilot running (the real server) the ideation room runs in the background; tests drive it inline.
+    f.background_ideation = float(os.environ.get("AI_FACTORY_AUTOPILOT_SECONDS", "5")) > 0
     return f
 
 
@@ -174,6 +177,11 @@ def dashboard(request: Request, user: User = Depends(current_user)) -> dict:
 
 # ---------------------------------------------------------------- projects / ideas
 
+def _project(r) -> dict:
+    return {"id": r["id"], "topic": r["topic"], "genre": r["genre"], "platform": r["platform"], "notes": r["notes"], "created_at": r["created_at"],
+            "status": r["status"], "research": json.loads(r["research"]) if r["research"] else None}
+
+
 @router.post("/projects", status_code=201)
 def create_project(payload: ProjectCreate, request: Request, user: User = Depends(current_user)) -> dict:
     with db.transaction() as conn:
@@ -184,7 +192,7 @@ def create_project(payload: ProjectCreate, request: Request, user: User = Depend
 @router.get("/projects")
 def list_projects(user: User = Depends(current_user)) -> list[dict]:
     with db.transaction() as conn:
-        return [dict(r) for r in conn.execute("SELECT id, topic, genre, platform, notes, created_at FROM projects WHERE user_id=? ORDER BY created_at DESC", (user.id,))]
+        return [_project(r) for r in conn.execute("SELECT * FROM projects WHERE user_id=? ORDER BY created_at DESC", (user.id,))]
 
 
 @router.get("/projects/{project_id}/ideas")
@@ -236,6 +244,18 @@ def run(line_id: str, request: Request, user: User = Depends(current_user), max_
     with db.transaction() as conn:
         _owned_line(conn, user.id, line_id)
         return factory(request).run_line(conn, user.id, line_id, max_waves=max_waves)
+
+
+@router.post("/lines/{line_id}/resume")
+def resume(line_id: str, request: Request, user: User = Depends(current_user)) -> dict:
+    with db.transaction() as conn:
+        line = _owned_line(conn, user.id, line_id)
+        if line["status"] == "paused":
+            factory(request).resume_blocked(conn, user.id, line_id)
+            conn.execute("UPDATE production_lines SET status='running', autopilot=1 WHERE id=?", (line_id,))
+        else:
+            conn.execute("UPDATE production_lines SET autopilot=1 WHERE id=?", (line_id,))
+        return {"status": conn.execute("SELECT status FROM production_lines WHERE id=?", (line_id,)).fetchone()[0]}
 
 
 @router.post("/lines/{line_id}/autopilot")
@@ -387,7 +407,7 @@ def state(request: Request, user: User = Depends(current_user)) -> dict:
     """Everything the web console renders, in one round trip."""
     f = factory(request)
     with db.transaction() as conn:
-        projects = [dict(r) for r in conn.execute("SELECT id, topic, genre, platform, notes, created_at FROM projects WHERE user_id=? ORDER BY created_at DESC", (user.id,))]
+        projects = [_project(r) for r in conn.execute("SELECT * FROM projects WHERE user_id=? ORDER BY created_at DESC", (user.id,))]
         ideas = [
             {**dict(r), "loop": json.loads(r["loop"]), "metrics": json.loads(r["metrics"]), "reviews": json.loads(r["reviews"]),
              "concept": json.loads(r["concept"]) if r["concept"] else None}

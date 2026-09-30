@@ -345,3 +345,12 @@ label.reserve { grid-template-columns: auto 1fr; align-items: center; }
 .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 .danger-zone { margin-top: 14px; color: var(--muted); }
 .danger-zone summary { cursor: pointer; color: #f7a1a7; }
+
+/* market research + ideation debate */
+.researchGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 10px 0; }
+.researchGrid h4 { margin: 0 0 6px; font-size: 13px; color: #aab4c3; }
+.plainList.compact li { padding: 6px 8px; font-size: 13px; display: block; }
+.plainList.compact small { color: #8b96a6; }
+details.debate { margin-top: 8px; border: 1px solid #1d2835; border-radius: 10px; padding: 6px 10px; background: #0c131b; }
+details.debate summary { cursor: pointer; font-size: 13px; color: #c9c2ff; }
+details.debate p { margin: 6px 0; }
