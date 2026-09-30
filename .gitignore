@@ -36,4 +36,4 @@ Thumbs.db
 logs/
 
 # Local pytest temp (short path for Windows git)
-.pyt/
+.pyt*/
