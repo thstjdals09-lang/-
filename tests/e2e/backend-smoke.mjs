@@ -75,8 +75,10 @@ try {
   const frame = page.locator("#modalRoot iframe");
   check((await frame.getAttribute("src")).includes("/builds/"), "backend build should be played from the sandboxed endpoint");
   await page.getByRole("button", { name: "닫기" }).click();
-  await page.getByRole("button", { name: "승인" }).first().click();
-  await page.waitForTimeout(500);
+  await page.locator(".reviewCard", { hasText: "승인 필요" }).first().getByRole("button", { name: "승인" }).click();
+  await page.waitForTimeout(800);
+  const after = await page.evaluate(async (o) => (await fetch(o + "/state", { credentials: "include" })).json(), origin);
+  check(after.lines.some((l) => l.stage === "live" && l.status !== "awaiting_ceo"), "approved release must leave the CEO gate (no awaiting_ceo at live)");
 
   await page.locator(".accountChip").click();
   await page.waitForSelector("text=내 사용 현황");
@@ -85,7 +87,8 @@ try {
   if (shots) await page.screenshot({ path: join(shots, "backend-account.png"), fullPage: true });
   await page.locator(".nav").getByRole("button", { name: "로그" }).click();
   check((await page.locator(".logList li").count()) > 10, "server logs should be listed");
-  await page.getByRole("button", { name: "로그아웃" }).click();
+  await page.locator(".accountChip").click();
+  await page.getByRole("button", { name: "로그아웃", exact: true }).click();
   await page.waitForSelector("text=Google 계정으로 로그인");
 } catch (err) {
   failures.push("step failed: " + err.message.split("\n").slice(0, 3).join(" | "));

@@ -54,6 +54,10 @@ class CapacityError(RuntimeError):
     pass
 
 
+class LineBusy(RuntimeError):
+    """The Leader is mid-wave on this line; the CEO action should be retried."""
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -518,16 +522,18 @@ class Factory:
             if stage_def["id"] == "vertical" or stage_def.get("ceo_gate"):
                 conn.execute("INSERT INTO reviews(id, line_id, build_id, kind, blocking, status) VALUES (?,?,?,?,?,'pending')",
                              (_id("rev"), line["id"], build_id, "release_candidate" if stage_def.get("ceo_gate") else "milestone", int(bool(stage_def.get("ceo_gate")))))
+        # Stage state first (atomic with the review row), network publishing afterwards: a pending
+        # review must never be visible while the line still reads as running.
         conn.execute("UPDATE stages SET status='completed', qa_status='passed', completed_at=? WHERE id=?", (_iso(), stage_row["id"]))
         self.log(conn, user_id, "STAGE COMPLETE", f"{line['title']} · {stage_def['name']} 통과", line["id"])
+        if stage_def.get("ceo_gate"):
+            conn.execute("UPDATE production_lines SET status='awaiting_ceo', leader_state='gate', leader_decision='릴리즈 빌드 CEO 승인 대기' WHERE id=?", (line["id"],))
+        else:
+            self._advance(conn, user_id, line)
         if deployed_version:
             self.deploy(conn, user_id, line, deployed_version, release=False)
         else:
             self.sync_line(conn, user_id, line)
-        if stage_def.get("ceo_gate"):
-            conn.execute("UPDATE production_lines SET status='awaiting_ceo', leader_state='gate', leader_decision='릴리즈 빌드 CEO 승인 대기' WHERE id=?", (line["id"],))
-            return
-        self._advance(conn, user_id, line)
 
     def _runtime_repair(self, conn, user_id, line, stage_def, stage_row, runtime) -> bool:
         """Opens a runtime-fix game task for a failed build. False once the retry budget is spent."""
@@ -725,6 +731,13 @@ class Factory:
     # ------------------------------------------------------------------ CEO actions
 
     def add_feedback(self, conn, user_id, line_id, text) -> str:
+        lock = self._locked(line_id)
+        try:
+            return self._add_feedback(conn, user_id, line_id, text)
+        finally:
+            lock.release()
+
+    def _add_feedback(self, conn, user_id, line_id, text) -> str:
         line = conn.execute("SELECT * FROM production_lines WHERE id=? AND user_id=?", (line_id, user_id)).fetchone()
         if line is None:
             raise KeyError("line not found")
@@ -751,7 +764,23 @@ class Factory:
         self.log(conn, user_id, "CEO FEEDBACK", f"{line['title']} · {text} → {stage_def['name']} task로 편성", line_id)
         return fb_id
 
+    def _locked(self, line_id):
+        lock = self.line_lock(line_id)
+        if not lock.acquire(timeout=30):
+            raise LineBusy(line_id)
+        return lock
+
     def approve(self, conn, user_id, review_id):
+        row = conn.execute("SELECT line_id FROM reviews WHERE id=?", (review_id,)).fetchone()
+        if row is None:
+            raise KeyError("review not found")
+        lock = self._locked(row["line_id"])
+        try:
+            self._approve(conn, user_id, review_id)
+        finally:
+            lock.release()
+
+    def _approve(self, conn, user_id, review_id):
         review = conn.execute("SELECT r.*, l.user_id, l.status AS line_status FROM reviews r JOIN production_lines l ON l.id=r.line_id WHERE r.id=?", (review_id,)).fetchone()
         if review is None or review["user_id"] != user_id:
             raise KeyError("review not found")
@@ -765,11 +794,21 @@ class Factory:
             self.deploy(conn, user_id, line, build["version"] if build else "1.0.0", release=True)
 
     def request_revision(self, conn, user_id, review_id, note):
+        row = conn.execute("SELECT line_id FROM reviews WHERE id=?", (review_id,)).fetchone()
+        if row is None:
+            raise KeyError("review not found")
+        lock = self._locked(row["line_id"])
+        try:
+            self._request_revision(conn, user_id, review_id, note)
+        finally:
+            lock.release()
+
+    def _request_revision(self, conn, user_id, review_id, note):
         review = conn.execute("SELECT r.*, l.user_id FROM reviews r JOIN production_lines l ON l.id=r.line_id WHERE r.id=?", (review_id,)).fetchone()
         if review is None or review["user_id"] != user_id:
             raise KeyError("review not found")
         conn.execute("UPDATE reviews SET status='revision_requested', note=?, reviewed_at=? WHERE id=?", (note, _iso(), review_id))
-        self.add_feedback(conn, user_id, review["line_id"], note)
+        self._add_feedback(conn, user_id, review["line_id"], note)
 
 
 def autopilot_pass(factory: "Factory") -> int:

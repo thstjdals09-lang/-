@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from .. import db
 from ..auth import User, csrf_guard, current_user
 from ..connections import row_to_out
-from .leader import DEFAULT_USER_SETTINGS, CapacityError, Factory
+from .leader import DEFAULT_USER_SETTINGS, CapacityError, Factory, LineBusy
 
 router = APIRouter(tags=["factory"], dependencies=[Depends(csrf_guard)])
 
@@ -250,7 +250,10 @@ def publish(line_id: str, request: Request, user: User = Depends(current_user)) 
 def feedback(line_id: str, payload: TextIn, request: Request, user: User = Depends(current_user)) -> dict:
     with db.transaction() as conn:
         _owned_line(conn, user.id, line_id)
-        return {"id": factory(request).add_feedback(conn, user.id, line_id, payload.text)}
+        try:
+            return {"id": factory(request).add_feedback(conn, user.id, line_id, payload.text)}
+        except LineBusy as exc:
+            raise HTTPException(status_code=409, detail="line_busy") from exc
 
 
 # ---------------------------------------------------------------- reviews / builds / logs
@@ -271,6 +274,8 @@ def approve(review_id: str, request: Request, user: User = Depends(current_user)
     with db.transaction() as conn:
         try:
             factory(request).approve(conn, user.id, review_id)
+        except LineBusy as exc:
+            raise HTTPException(status_code=409, detail="line_busy") from exc
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="review_not_found") from exc
     return {"status": "approved"}
@@ -281,6 +286,8 @@ def revise(review_id: str, payload: TextIn, request: Request, user: User = Depen
     with db.transaction() as conn:
         try:
             factory(request).request_revision(conn, user.id, review_id, payload.text)
+        except LineBusy as exc:
+            raise HTTPException(status_code=409, detail="line_busy") from exc
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="review_not_found") from exc
     return {"status": "revision_requested"}

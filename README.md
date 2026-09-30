@@ -15,6 +15,15 @@ Live console: https://thstjdals09-lang.github.io/-/
 | **Preview** (GitHub Pages, no server) | The whole factory is simulated in the browser: routing, failover, quota, task graphs, builds you can play | None. API-key inputs are disabled; nothing secret is stored |
 | **Backend** (Google login) | The server Leader executes tasks on your connected AI providers, commits every task through git worktrees, and serves builds | Provider keys live only in the server's encrypted vault; the browser holds `vault://` references |
 
+## Accounts
+
+Every Google account is its own workspace: AI keys (encrypted per user), connected AIs, projects, production
+lines, quota history, settings and GitHub publishing are separated per account. The first sign-in creates the
+account (`AI_FACTORY_SIGNUP_MODE=open`, or `allowlist` with `AI_FACTORY_ALLOWED_EMAILS`). **내 계정** shows
+the profile and usage, connects the user's own GitHub (games are published only to that user's GitHub),
+signs out everywhere, exports the account's data without secrets, and deletes the account with all its data.
+The GitHub Pages preview has no accounts: it is a guest-only simulation stored in the browser.
+
 ## Architecture
 
 ```
