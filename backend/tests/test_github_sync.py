@@ -74,46 +74,89 @@ def test_existing_repository_is_never_reused():
     assert not any(method == "POST" and "/git/" in path for method, path in fake.calls)
 
 
-def test_line_history_is_mirrored_and_release_published(github, signed_in, remote):
-    signed_in.post("/projects", json={"topic": "zombie"}, headers=CSRF)
-    line_id = signed_in.get("/lines").json()[0]["id"]
-    assert signed_in.post(f"/lines/{line_id}/run", headers=CSRF).json()["status"] == "awaiting_ceo"
+def _to_release(client):
+    client.post("/projects", json={"topic": "zombie"}, headers=CSRF)
+    line_id = client.get("/lines").json()[0]["id"]
+    assert client.post(f"/lines/{line_id}/run", headers=CSRF).json()["status"] == "awaiting_ceo"
+    return line_id
 
-    log = _git(remote, "log", "--oneline", "main")
-    assert len(log.splitlines()) > 50 and "merge ai-factory/" in log
+
+def _approve(client, line_id):
+    review = next(r for r in client.get("/reviews").json() if r["line_id"] == line_id and r["blocking"] and r["status"] == "pending")
+    assert client.post(f"/reviews/{review['id']}/approve", headers=CSRF).status_code == 200
+
+
+def test_nothing_is_pushed_until_the_finished_game_is_approved(github, signed_in, remote):
+    line_id = _to_release(signed_in)
+    # a whole production run: no repository, no push, no Pages while the game is being made
+    assert not any(m == "POST" for m, _ in github._client.calls)
+    assert _git(remote, "for-each-ref") == ""
     detail = signed_in.get(f"/lines/{line_id}").json()
-    # every playable build was deployed and only marked live after the URL answered 200
-    assert [d["version"] for d in detail["deployments"]] == ["1.0.0", "0.9.0", "0.8.0", "0.5.0", "0.1.0"]
-    assert all(d["status"] == "live" and d["kind"] == "pages" for d in detail["deployments"])
-    assert detail["publication"]["pagesUrl"].startswith("https://ceo.github.io/aif-zombie-")
+    assert detail["deployments"] == [] and detail["publication"] is None
+    assert len(detail["builds"]) >= 5  # intermediate builds stay playable from the console
 
-    review = next(r for r in signed_in.get("/reviews").json() if r["line_id"] == line_id and r["blocking"])
-    signed_in.post(f"/reviews/{review['id']}/approve", headers=CSRF)
+    _approve(signed_in, line_id)
     pub = signed_in.get(f"/lines/{line_id}").json()["publication"]
     assert pub["status"] == "live" and pub["kind"] == "release" and pub["version"] == "1.0.0"
+    assert pub["pagesUrl"].startswith("https://ceo.github.io/aif-zombie-")
+    # one clean commit: the finished game, not the task history
+    assert _git(remote, "log", "--format=%s", "main").splitlines() == [f"release: v1.0.0 {signed_in.get(f'/lines/{line_id}').json()['title']}"]
+    files = set(_git(remote, "ls-tree", "--name-only", "main").split())
+    assert {"index.html", "README.md"} <= files and not any(f.startswith(("builds", "src", "wt")) for f in files)
     assert "data-ai-factory-game" in _git(remote, "show", "main:index.html")
-    assert _git(remote, "log", "-1", "--format=%s", "main").startswith("release: v1.0.0")
     assert TOKEN not in str(signed_in.get("/logs").json())
 
 
-def test_sync_failure_is_logged_without_the_token(client, signed_in, tmp_path):
+def test_a_revised_release_is_a_second_commit_on_the_same_repository(github, signed_in, remote):
+    line_id = _to_release(signed_in)
+    _approve(signed_in, line_id)
+    assert signed_in.post(f"/lines/{line_id}/run", headers=CSRF).json()["status"] == "complete"
+    assert signed_in.post(f"/lines/{line_id}/feedback", json={"text": "적 속도를 조금 낮춰줘"}, headers=CSRF).status_code == 201
+    assert signed_in.post(f"/lines/{line_id}/run", headers=CSRF).json()["status"] == "awaiting_ceo"
+    _approve(signed_in, line_id)
+    log = _git(remote, "log", "--format=%s", "main").splitlines()
+    assert len(log) == 2 and all(m.startswith("release: v1.0.0") for m in log)
+    assert sum(1 for m, p in github._client.calls if m == "POST" and p == "/user/repos") == 1
+
+
+def test_repository_from_the_old_flow_is_fast_forwarded(github, signed_in, remote, tmp_path):
+    from app import db
+
+    line_id = _to_release(signed_in)
+    seed = tmp_path / "seed"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(seed)], check=True)
+    (seed / "old.txt").write_text("task history pushed by an earlier version", encoding="utf-8")
+    _git(seed, "add", "-A")
+    _git(seed, "-c", "user.name=x", "-c", "user.email=x@x", "commit", "-q", "-m", "old history")
+    _git(seed, "push", "-q", str(remote), "main:main")
+    old = _git(remote, "rev-parse", "main").strip()
+    with db.transaction() as conn:
+        conn.execute("INSERT INTO publications(id, line_id, kind, status, repository, repository_url) VALUES ('pub_old', ?, 'repository', 'synced', 'ceo/aif-old', 'https://github.com/ceo/aif-old')", (line_id,))
+
+    _approve(signed_in, line_id)
+    assert signed_in.get(f"/lines/{line_id}").json()["publication"]["status"] == "live"
+    assert _git(remote, "rev-parse", "main~1").strip() == old  # no force push: the old history is kept
+    assert ("POST", "/user/repos") not in github._client.calls
+
+
+def test_publish_failure_is_logged_without_the_token(client, signed_in, tmp_path):
     client.app.state.github_sync = GitHubSync(FakeGitHub(), TOKEN, remote_template=str(tmp_path / "missing.git"))
-    signed_in.post("/projects", json={"topic": "zombie"}, headers=CSRF)
-    line_id = signed_in.get("/lines").json()[0]["id"]
-    signed_in.post(f"/lines/{line_id}/run", headers=CSRF, params={"max_waves": 3})
+    line_id = _to_release(signed_in)
+    _approve(signed_in, line_id)
     logs = signed_in.get("/logs").json()
-    assert any(l["type"] == "GITHUB SYNC FAIL" for l in logs)
-    assert TOKEN not in str(logs) and signed_in.get(f"/lines/{line_id}").json()["status"] == "running"
+    assert any(l["type"] == "PUBLISH FAIL" for l in logs)
+    assert TOKEN not in str(logs)
+    detail = signed_in.get(f"/lines/{line_id}").json()
+    assert detail["publication"]["status"] == "failed" and detail["status"] == "running"
 
 
-def test_publish_without_token_commits_release_locally(signed_in):
+def test_publish_without_token_keeps_the_release_on_the_server(signed_in):
     signed_in.post("/projects", json={"topic": "zombie"}, headers=CSRF)
     line_id = signed_in.get("/lines").json()[0]["id"]
     assert signed_in.post(f"/lines/{line_id}/publish", headers=CSRF).status_code == 409
     signed_in.post(f"/lines/{line_id}/run", headers=CSRF)
     res = signed_in.post(f"/lines/{line_id}/publish", headers=CSRF).json()
     assert res["status"] == "not_configured"
-    assert all(d["status"] == "not_configured" for d in signed_in.get(f"/lines/{line_id}").json()["deployments"])
     assert signed_in.get(f"/lines/{line_id}").json()["publication"]["status"] == "not_configured"
 
 
@@ -121,13 +164,11 @@ def test_unreachable_pages_url_is_never_marked_live(client, signed_in, remote):
     sync = GitHubSync(FakeGitHub(), TOKEN, remote_template=str(remote))
     client.app.state.github_sync = sync
     client.app.state.pages_verifier = verifier_for(sync, status_code=404)
-    signed_in.post("/projects", json={"topic": "zombie"}, headers=CSRF)
-    line_id = signed_in.get("/lines").json()[0]["id"]
-    for _ in range(40):
-        signed_in.post(f"/lines/{line_id}/tick", headers=CSRF)
-        detail = signed_in.get(f"/lines/{line_id}").json()
-        if detail["deployments"]:
-            break
+    line_id = _to_release(signed_in)
+    _approve(signed_in, line_id)
+    detail = signed_in.get(f"/lines/{line_id}").json()
     assert detail["deployments"][0]["status"] == "failed"
     assert "HTTP 404" in detail["deployments"][0]["detail"]
     assert any(l["type"] == "PUBLISH FAIL" for l in signed_in.get("/logs").json())
+    # the release can be retried from the console after the approval
+    assert signed_in.post(f"/lines/{line_id}/publish", headers=CSRF).status_code == 200

@@ -564,7 +564,6 @@ class Factory:
                  f"builds/v{version}/screenshot.png" if runtime["screenshot"] else None),
             )
             conn.execute("INSERT INTO artifacts(line_id, stage_key, path, content) VALUES (?,?,?,?)", (line["id"], stage_def["id"], f"builds/v{version}/index.html", html))
-            deployed_version = version if passed else None
             self.log(conn, user_id, "BUILD", f"{line['title']} v{version} · smoke {'통과' if smoke['passed'] else '실패'} · runtime {runtime['status']}", line["id"])
             if stage_def["id"] == "vertical" or stage_def.get("ceo_gate"):
                 conn.execute("INSERT INTO reviews(id, line_id, build_id, kind, blocking, status) VALUES (?,?,?,?,?,'pending')",
@@ -577,10 +576,8 @@ class Factory:
             conn.execute("UPDATE production_lines SET status='awaiting_ceo', leader_state='gate', leader_decision='릴리즈 빌드 CEO 승인 대기' WHERE id=?", (line["id"],))
         else:
             self._advance(conn, user_id, line)
-        if deployed_version:
-            self.deploy(conn, user_id, line, deployed_version, release=False)
-        else:
-            self.sync_line(conn, user_id, line)
+        # Nothing goes to GitHub while the game is in production: builds are played from the
+        # console, and the repository + Pages link are made once the CEO approves the release.
 
     def _runtime_repair(self, conn, user_id, line, stage_def, stage_row, runtime) -> bool:
         """Opens a runtime-fix game task for a failed build. False once the retry budget is spent."""
@@ -612,7 +609,7 @@ class Factory:
 
     def _repo_ref(self, conn, line) -> RepoRef | None:
         row = conn.execute(
-            "SELECT repository, repository_url FROM publications WHERE line_id=? AND repository IS NOT NULL AND status IN ('synced','deploying','live') ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            "SELECT repository, repository_url FROM publications WHERE line_id=? AND repository IS NOT NULL AND status IN ('created','synced','deploying','live') ORDER BY created_at DESC, rowid DESC LIMIT 1",
             (line["id"],),
         ).fetchone()
         if not row:
@@ -633,57 +630,59 @@ class Factory:
             return GitHubSync.from_environment()
         return None
 
-    def sync_line(self, conn, user_id, line) -> RepoRef | None:
-        """Pushes the line repository (full task history) to GitHub. Best effort: never blocks production."""
+    def _release_files(self, conn, ws, line, version) -> dict:
+        idea = conn.execute("SELECT pitch FROM ideas WHERE id=?", (line["idea_id"],)).fetchone()
+        files: dict[str, str | bytes] = {"index.html": self.current_game(ws, line)}
+        shot = ws.read_bytes(f"builds/v{version}/screenshot.png")
+        if shot:
+            files["screenshot.png"] = shot
+        notes = ws.read("release-notes.md")
+        if notes:
+            files["RELEASE_NOTES.md"] = notes
+        files["README.md"] = (
+            f"# {line['title']}\n\n{idea['pitch'] if idea else ''}\n\n"
+            + ("![screenshot](screenshot.png)\n\n" if shot else "")
+            + f"- Version: v{version}\n- Play: this repository's GitHub Pages link, or open `index.html`\n"
+            + "- Produced by AI Factory: planned, written, reviewed and QA-tested by collaborating AI workers, approved by the CEO.\n"
+        )
+        return files
+
+    def deploy(self, conn, user_id, line, version: str) -> dict:
+        """Publishes the finished game once: GitHub repository (created now, not during production)
+        → one clean release commit → push → Pages → the link is shown only after it answers 200."""
+        ws = self.workspace(user_id, line["id"])
+        ws.ensure(line["title"])
+        files = self._release_files(conn, ws, line, version)
+        message = f"release: v{version} {line['title']}"
+        conn.commit()  # no DB write lock is held during git and network I/O
         gh = self.github_for(conn, user_id)
         if not gh:
-            return None
-        conn.commit()  # no DB write lock is held during network I/O
+            sha = ws.snapshot_commit(files, message, "Release Manager")
+            self._publication(conn, line["id"], kind="release", status="not_configured", version=version, commit_sha=sha, detail="GitHub not connected for this account")
+            self.log(conn, user_id, "PUBLISH WAITING", f"{line['title']} v{version} · 내 계정에 GitHub가 연결되지 않아 서버에만 보관 (내 계정 → GitHub 연결 후 다시 배포)", line["id"])
+            return {"status": "not_configured"}
+        ref = self._repo_ref(conn, line)
         try:
-            ref = self._repo_ref(conn, line)
+            parent = gh.remote_head(ws, ref) if ref else None
             if ref is None:
                 idea = conn.execute("SELECT pitch FROM ideas WHERE id=?", (line["idea_id"],)).fetchone()
                 ref = gh.ensure_repo(repo_name(line["project_slug"], line["slug"], line["id"]), f"AI Factory · {line['title']} · {idea['pitch'] if idea else ''}")
-            sha = gh.push(self.workspace(user_id, line["id"]), ref)
-        except (GitHubSyncError, GitHubAPIError, WorkspaceError) as exc:
-            self._publication(conn, line["id"], kind="repository", status="failed", detail=vault.redact(str(exc))[:300])
-            self.log(conn, user_id, "GITHUB SYNC FAIL", f"{line['title']} · {vault.redact(str(exc))[:200]}", line["id"])
-            return None
-        self._publication(conn, line["id"], kind="repository", status="synced", repository=f"{ref.owner}/{ref.repo}", repository_url=ref.html_url, commit_sha=sha)
-        self.log(conn, user_id, "GITHUB SYNC", f"{line['title']} · {sha[:7]} → {ref.owner}/{ref.repo}", line["id"])
-        return ref
-
-    def deploy(self, conn, user_id, line, version: str, *, release: bool) -> dict:
-        """Puts the current game on GitHub Pages: root index.html + README on main → push →
-        enable Pages → verify the URL answers 200 before the console links to it."""
-        ws = self.workspace(user_id, line["id"])
-        ws.ensure(line["title"])
-        idea = conn.execute("SELECT pitch FROM ideas WHERE id=?", (line["idea_id"],)).fetchone()
-        label = "정식 릴리즈" if release else "플레이 빌드"
-        readme = (f"# {line['title']}\n\n{idea['pitch'] if idea else ''}\n\n- Version: v{version} ({label})\n"
-                  "- Play: open `index.html` (or this repository's GitHub Pages site)\n- Windows: `release/windows/Play.cmd` (from the Release Build)\n"
-                  "- Produced by AI Factory; every task is a merged `ai-factory/...` branch in this history.\n")
-        conn.commit()
-        sha = ws.commit_on_main({"index.html": self.current_game(ws, line), "README.md": readme},
-                                f"{'release' if release else 'deploy'}: v{version} {line['title']}", "Release Manager")
-        kind = "release" if release else "pages"
-        gh = self.github_for(conn, user_id)
-        if not gh:
-            self._publication(conn, line["id"], kind=kind, status="not_configured", version=version, commit_sha=sha, detail="GitHub not connected for this account")
-            self.log(conn, user_id, "PUBLISH WAITING", f"{line['title']} v{version} · 내 계정에 GitHub가 연결되지 않아 로컬 저장소에만 커밋 (내 계정 → GitHub 연결)", line["id"])
-            return {"status": "not_configured"}
-        ref = self.sync_line(conn, user_id, line)
-        if ref is None:
-            return {"status": "failed"}
-        try:
+                self._publication(conn, line["id"], kind="repository", status="created", repository=f"{ref.owner}/{ref.repo}", repository_url=ref.html_url)
+                self.log(conn, user_id, "GITHUB REPO", f"{line['title']} · 저장소 생성 {ref.owner}/{ref.repo}", line["id"])
+                conn.commit()
+            sha = ws.snapshot_commit(files, message, "Release Manager", parent=parent)
+            gh.push(ws, ref, source="release")
             pages_url = gh.enable_pages(ref)
-        except (GitHubSyncError, GitHubAPIError) as exc:
-            self._publication(conn, line["id"], kind=kind, status="failed", version=version, repository=f"{ref.owner}/{ref.repo}", repository_url=ref.html_url, detail=str(exc)[:300])
-            self.log(conn, user_id, "PUBLISH FAIL", f"{line['title']} · {str(exc)[:200]}", line["id"])
+        except (GitHubSyncError, GitHubAPIError, WorkspaceError) as exc:
+            detail = vault.redact(str(exc))[:300]
+            repo = {"repository": f"{ref.owner}/{ref.repo}", "repository_url": ref.html_url} if ref else {}
+            self._publication(conn, line["id"], kind="release", status="failed", version=version, detail=detail, **repo)
+            self.log(conn, user_id, "PUBLISH FAIL", f"{line['title']} · {detail[:200]}", line["id"])
             return {"status": "failed"}
-        pub_id = self._publication(conn, line["id"], kind=kind, status="deploying", version=version, repository=f"{ref.owner}/{ref.repo}",
+        self.log(conn, user_id, "GITHUB PUSH", f"{line['title']} v{version} · 커밋 {sha[:7]} → {ref.owner}/{ref.repo}", line["id"])
+        pub_id = self._publication(conn, line["id"], kind="release", status="deploying", version=version, repository=f"{ref.owner}/{ref.repo}",
                                    repository_url=ref.html_url, pages_url=pages_url, commit_sha=sha)
-        self.log(conn, user_id, "DEPLOYING", f"{line['title']} v{version} {label} · Pages 빌드 확인 중 · {pages_url}", line["id"])
+        self.log(conn, user_id, "DEPLOYING", f"{line['title']} v{version} · Pages 빌드 확인 중 · {pages_url}", line["id"])
         conn.commit()
         (self.verifier or PagesVerifier(gh)).watch(publication_id=pub_id, user_id=user_id, line_id=line["id"], title=f"{line['title']} v{version}", ref=ref, url=pages_url, expect=sha)
         return {"status": "deploying", "repository_url": ref.html_url, "pages_url": pages_url}
@@ -694,7 +693,7 @@ class Factory:
         if line is None:
             raise KeyError("line not found")
         build = conn.execute("SELECT version FROM builds WHERE line_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1", (line_id,)).fetchone()
-        return self.deploy(conn, user_id, line, build["version"] if build else "0.0.0", release=True)
+        return self.deploy(conn, user_id, line, build["version"] if build else "0.0.0")
 
     def _advance(self, conn, user_id, line):
         if line["stage_index"] >= len(self.stages) - 1:
@@ -883,7 +882,7 @@ class Factory:
             line = conn.execute("SELECT * FROM production_lines WHERE id=?", (review["line_id"],)).fetchone()
             self._advance(conn, user_id, line)
             build = conn.execute("SELECT version FROM builds WHERE id=?", (review["build_id"],)).fetchone()
-            self.deploy(conn, user_id, line, build["version"] if build else "1.0.0", release=True)
+            self.deploy(conn, user_id, line, build["version"] if build else "1.0.0")
 
     def request_revision(self, conn, user_id, review_id, note):
         row = conn.execute("SELECT line_id FROM reviews WHERE id=?", (review_id,)).fetchone()

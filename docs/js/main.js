@@ -394,6 +394,9 @@ const remoteActions = {
     if (!confirm("생산 로그를 모두 비울까요?")) return;
     remote(() => api.clearLogs());
   },
+  publish(id) {
+    remote(() => api.publish(id));
+  },
   "build-idea"(id) {
     remote(async () => {
       try {

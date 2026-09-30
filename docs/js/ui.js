@@ -86,7 +86,8 @@ export function publicationBlock(line, mode) {
   if (mode !== "backend") {
     return '<p class="muted small">GitHub 배포는 백엔드 모드에서 동작합니다 (프리뷰는 서버·토큰이 없어 게시하지 않음).</p>';
   }
-  if (!pub) return '<p class="muted small">첫 플레이 빌드(Prototype)가 나오면 GitHub 저장소 생성 → 푸시 → Pages 배포가 자동으로 시작됩니다.</p>';
+  if (!pub) return '<p class="muted small">제작 중에는 GitHub에 올리지 않습니다. 중간 빌드는 아래 빌드 목록에서 바로 플레이할 수 있고, 게임이 완성되어 CEO가 릴리즈를 승인하면 GitHub 저장소 생성 → 커밋·푸시 → github.io 플레이 링크가 한 번에 만들어집니다.</p>';
+  const retry = '<button class="btn primary" data-action="publish" data-id="' + esc(line.id) + '">다시 배포</button>';
   const repo = pub.repositoryUrl ? '<a class="btn" href="' + esc(pub.repositoryUrl) + '" target="_blank" rel="noopener">GitHub 저장소 ↗</a>' : "";
   const version = pub.version ? " v" + esc(pub.version) : "";
   const kind = pub.kind === "release" ? "정식 릴리즈" : "플레이 빌드";
@@ -98,9 +99,9 @@ export function publicationBlock(line, mode) {
   } else if (pub.status === "deploying") {
     html = '<div class="deploy"><span class="pill info">배포 확인 중</span><strong>' + kind + version + '</strong><p class="muted small">GitHub Pages 빌드와 접속(200)을 확인한 뒤 링크가 열립니다. 보통 1–2분.</p><div class="actions wrap">' + repo + "</div></div>";
   } else if (pub.status === "not_configured") {
-    html = '<div class="deploy"><span class="pill warn">GitHub 미설정</span><p class="muted small">서버에 AI_FACTORY_GITHUB_TOKEN이 없어 로컬 저장소에만 커밋했습니다.</p></div>';
+    html = '<div class="deploy"><span class="pill warn">GitHub 미연결</span><p class="muted small">완성본은 서버에 보관했습니다. 내 계정 → GitHub 연결 후 "다시 배포"를 누르면 저장소와 링크가 만들어집니다.</p><div class="actions wrap">' + retry + "</div></div>";
   } else if (pub.status === "failed") {
-    html = '<div class="deploy"><span class="pill bad">배포 실패</span><strong>' + kind + version + '</strong><p class="muted small">' + esc(pub.detail || "") + '</p><div class="actions wrap">' + repo + "</div></div>";
+    html = '<div class="deploy"><span class="pill bad">배포 실패</span><strong>' + kind + version + '</strong><p class="muted small">' + esc(pub.detail || "") + '</p><div class="actions wrap">' + retry + repo + "</div></div>";
   } else {
     html = '<div class="deploy"><span class="pill neutral">저장소 동기화 ' + esc(pub.status) + '</span><div class="actions wrap">' + repo + "</div></div>";
   }

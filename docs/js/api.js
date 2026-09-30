@@ -70,6 +70,7 @@ export function createApi(getBase) {
     deleteProject: (id) => req("/projects/" + encodeURIComponent(id), { method: "DELETE", timeout: 60000 }),
     deleteIdea: (id) => req("/ideas/" + encodeURIComponent(id), { method: "DELETE" }),
     clearLogs: () => req("/logs", { method: "DELETE" }),
+    publish: (id) => req("/lines/" + encodeURIComponent(id) + "/publish", { method: "POST", timeout: 120000 }),
     approve: (id) => req("/reviews/" + encodeURIComponent(id) + "/approve", { method: "POST" }),
     revise: (id, text) => req("/reviews/" + encodeURIComponent(id) + "/revise", { method: "POST", body: { text } }),
     oauthStart: (providerId, returnTo) => req("/providers/oauth/" + encodeURIComponent(providerId) + "/start?return_to=" + encodeURIComponent(returnTo)),

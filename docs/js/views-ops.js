@@ -27,7 +27,7 @@ export function review(app) {
     );
   };
   return (
-    '<section class="stack"><div class="sectionTitle"><h2>검토 대기 ' + pending.length + '</h2><span class="muted">Release Candidate는 승인해야 Live Ops로 넘어갑니다.</span></div>' +
+    '<section class="stack"><div class="sectionTitle"><h2>검토 대기 ' + pending.length + '</h2><span class="muted">Release Candidate를 승인하면 GitHub 저장소 생성 → 커밋·푸시 → github.io 링크 배포가 진행됩니다.</span></div>' +
     (pending.length ? pending.map(card).join("") : empty("대기 중인 검토가 없습니다.")) +
     (done.length ? '<div class="sectionTitle"><h2>처리됨 ' + done.length + "</h2></div>" + done.map(card).join("") : "") +
     "</section>"

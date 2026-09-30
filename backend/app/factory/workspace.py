@@ -12,12 +12,14 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from .ideation import slugify
 
 GIT_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_NOSYSTEM": "1"}
+RELEASE_REF = "refs/heads/release"
 
 
 class WorkspaceError(RuntimeError):
@@ -124,6 +126,29 @@ class LineWorkspace:
         self._git("add", "-A")
         self._git("commit", "-q", "--allow-empty", "-m", message, author=author)
         return self._git("rev-parse", "HEAD")
+
+    def rev(self, ref: str) -> str | None:
+        try:
+            return self._git("rev-parse", "--verify", "--quiet", ref + "^{commit}")
+        except WorkspaceError:
+            return None
+
+    def snapshot_commit(self, files: dict[str, str | bytes], message: str, author: str, parent: str | None = None, ref: str = RELEASE_REF) -> str:
+        """Commits exactly `files` on a separate branch without touching main or its working tree.
+        The published repository gets one clean commit per release instead of every task commit."""
+        with tempfile.TemporaryDirectory(dir=self.root) as tmp:
+            env = {"GIT_INDEX_FILE": str(Path(tmp) / "index")}
+            blob_src = Path(tmp) / "blob"
+            for rel, content in files.items():
+                path = _safe_relpath(rel).as_posix()
+                blob_src.write_bytes(content if isinstance(content, bytes) else content.encode("utf-8"))
+                blob = self._git("hash-object", "-w", str(blob_src))
+                self._git("update-index", "--add", "--cacheinfo", f"100644,{blob},{path}", extra_env=env)
+            tree = self._git("write-tree", extra_env=env)
+        parent = parent or self.rev(ref)
+        sha = self._git("commit-tree", tree, *(["-p", parent] if parent else []), "-m", message, author=author)
+        self._git("update-ref", ref, sha)
+        return sha
 
     def git_env(self, extra_env: dict, *args: str) -> str:
         """Runs git with extra environment (e.g. GIT_CONFIG_* credentials kept out of argv)."""

@@ -250,7 +250,8 @@ def autopilot(line_id: str, payload: Toggle, user: User = Depends(current_user))
 def publish(line_id: str, request: Request, user: User = Depends(current_user)) -> dict:
     with db.transaction() as conn:
         line = _owned_line(conn, user.id, line_id)
-        if line["status"] not in ("awaiting_ceo", "complete"):
+        released = conn.execute("SELECT 1 FROM publications WHERE line_id=? AND kind='release'", (line_id,)).fetchone()
+        if line["status"] not in ("awaiting_ceo", "complete") and not released:
             raise HTTPException(status_code=409, detail="release_not_ready")
         return factory(request).publish_release(conn, user.id, line_id)
 

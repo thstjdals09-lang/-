@@ -1,4 +1,5 @@
-"""Mirrors production-line repositories to GitHub and publishes approved releases to Pages.
+"""Publishes finished (CEO-approved) games to GitHub: one repository per line, one clean commit
+per release, GitHub Pages for the play link. Work-in-progress task history stays on the server.
 
 The server token (AI_FACTORY_GITHUB_TOKEN) reaches git only through GIT_CONFIG_* environment
 variables as an HTTP header, so it never appears in process arguments, remote URLs or logs.
@@ -69,15 +70,31 @@ class GitHubSync:
             raise GitHubSyncError(f"repository create failed: {exc}") from exc
         return RepoRef(owner=owner, repo=name, html_url=str(payload.get("html_url") or f"https://github.com/{owner}/{name}"))
 
-    def push(self, ws: LineWorkspace, ref: RepoRef) -> str:
+    def _remote(self, ref: RepoRef) -> tuple[str, str, dict]:
         url = self._remote_template.format(owner=ref.owner, repo=ref.repo)
         basic = base64.b64encode(f"x-access-token:{self._token}".encode()).decode()
         env = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.extraheader", "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {basic}"}
+        return url, basic, env
+
+    def remote_head(self, ws: LineWorkspace, ref: RepoRef) -> str | None:
+        """Tip of the published main branch (None for an empty repository), so the next release
+        commit builds on it and the push stays a fast-forward."""
+        url, basic, env = self._remote(ref)
         try:
-            ws.git_env(env, "push", "--quiet", url, "main:main")
+            ws.git_env(env, "fetch", "--quiet", "--no-tags", url, "+refs/heads/main:refs/published/main")
+        except WorkspaceError as exc:
+            if "find remote ref" in str(exc).lower():
+                return None
+            raise GitHubSyncError(redact(str(exc), self._token, basic)) from exc
+        return ws.rev("refs/published/main")
+
+    def push(self, ws: LineWorkspace, ref: RepoRef, source: str = "main") -> str:
+        url, basic, env = self._remote(ref)
+        try:
+            ws.git_env(env, "push", "--quiet", url, f"{source}:refs/heads/main")
         except WorkspaceError as exc:
             raise GitHubSyncError(redact(str(exc), self._token, basic)) from exc
-        return ws.head()
+        return ws.rev(source) or ws.head()
 
     def enable_pages(self, ref: RepoRef) -> str:
         base = f"/repos/{quote(ref.owner)}/{quote(ref.repo)}"

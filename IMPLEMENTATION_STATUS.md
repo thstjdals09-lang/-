@@ -55,7 +55,7 @@ Legend: `[x]` implemented and tested, `[-]` partial, `[ ]` not started.
 - [x] Per-task branch `ai-factory/<project>/<line>/<agent>/<stage>-<task>` in its own git worktree
 - [x] Worker commit → reviewer (coding tasks) → merge `--no-ff` into main → worktree and branch cleanup
 - [x] Path confinement for model-supplied file names (incl. Windows anchors/drives), Windows MAX_PATH-safe layout
-- [x] Line repositories mirrored to GitHub (`aif-` repos only; existing repositories are never reused)
+- [x] Nothing goes to GitHub during production; the `aif-` repository is created when the CEO approves the release (existing repositories are never reused)
 - [x] Parallel workers inside one wave (provider calls concurrent, git/DB finalization serialized)
 
 ## P4: end-to-end generated game
@@ -67,7 +67,7 @@ Legend: `[x]` implemented and tested, `[-]` partial, `[ ]` not started.
 - [x] Isolated runtime QA (offline headless Chromium) with screenshots, auto-repair and safe revert
 - [x] Vision QA receives the runtime screenshot
 - [ ] Native Windows packaging (Tauri/Electron)
-- [x] Every playable build deployed to GitHub Pages; links shown only after the URL answers 200
+- [x] Each approved release is one clean commit (game + README + screenshot, no task history) on the repo's main → Pages; links shown only after the URL answers 200
 - [x] Verified against real GitHub (repo create → push → Pages → 200)
 
 ## CI
