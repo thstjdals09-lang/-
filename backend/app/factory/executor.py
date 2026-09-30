@@ -95,7 +95,7 @@ _HTML_BLOCK = re.compile(r"```html\s*\n(.*?)```", re.S | re.I)
 def extract_game(text: str) -> str | None:
     """Returns the last complete HTML document the model produced, if any."""
     blocks = [b.strip() for b in _HTML_BLOCK.findall(text or "")]
-    docs = [b for b in blocks if b.lower().startswith("<!doctype html")]
+    docs = [b for b in blocks if b.lower().startswith(("<!doctype html", "<html"))]
     return docs[-1] + "\n" if docs else None
 
 

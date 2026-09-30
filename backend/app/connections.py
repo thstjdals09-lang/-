@@ -106,6 +106,10 @@ def verify(conn: sqlite3.Connection, user_id: str, row: sqlite3.Row, entry: dict
         "UPDATE provider_connections SET status='online', models=?, last_verified=?, last_error=NULL WHERE id=?",
         (json.dumps(health.models[:200]), _iso(now), row["id"]),
     )
+    # A model the provider does not serve would fail every task: pick one it actually lists.
+    if health.models and row["model"] not in health.models:
+        preferred = next((m for m in health.models if entry.get("default_model") and m.startswith(str(entry["default_model"]).split(":")[0])), health.models[0])
+        conn.execute("UPDATE provider_connections SET model=? WHERE id=?", (preferred, row["id"]))
     if quota and quota.limit:
         used = max(0.0, quota.limit - (quota.remaining if quota.remaining is not None else quota.limit))
         conn.execute(

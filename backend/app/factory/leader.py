@@ -394,7 +394,9 @@ class Factory:
             if game_task:
                 ctx.game_task = True
                 existing = ws.read(GAME_PATH)
-                ctx.game_source = existing if existing and games.smoke_test(existing)["passed"] else None
+                # The emergency template is never handed to the AI as "the game": it would just edit it.
+                usable = existing and games.smoke_test(existing)["passed"] and not games.is_fallback(existing)
+                ctx.game_source = existing if usable else None
             if task["kind"] == "vision":
                 shot = runtime_qa.run(self.current_game(ws, line))
                 if shot["screenshot"]:
@@ -430,15 +432,20 @@ class Factory:
         files = {path: body}
         if res["game_task"]:
             generated = extract_game(text) if connection_id != SIM_ID else None
-            if generated and games.smoke_test(generated)["passed"]:
+            if generated:
+                generated = games.normalize(generated)
+            similarity = games.template_similarity(generated, self.catalog_dir) if generated else 0.0
+            if generated and games.smoke_test(generated)["passed"] and similarity < 0.7:
                 files[GAME_PATH] = generated
-                self.log(conn, user_id, "GAME UPDATE", f"{line['title']} · {worker}가 게임 코드 갱신 ({len(generated):,} bytes)", line["id"])
+                self.log(conn, user_id, "GAME UPDATE", f"{line['title']} · {worker}가 게임 코드 작성/갱신 ({len(generated):,} bytes)", line["id"])
             else:
                 if generated:
-                    self.log(conn, user_id, "GAME REJECTED", f"{line['title']} · {worker} 결과가 정적 검증 실패 → 이전 게임 유지", line["id"])
-                if ws.read(GAME_PATH) is None:
-                    files[GAME_PATH] = self._template_game(line)  # emergency fallback so main stays playable
-                    self.log(conn, user_id, "TEMPLATE FALLBACK", f"{line['title']} · AI가 만든 게임이 없어 비상용 템플릿으로 main을 채움", line["id"])
+                    reason = "기본 템플릿을 거의 그대로 반환" if similarity >= 0.7 else "필수 요소(startGame 등) 누락"
+                    self.log(conn, user_id, "GAME REJECTED", f"{line['title']} · {worker} 결과 거부: {reason} → 이전 게임 유지", line["id"])
+                current = ws.read(GAME_PATH)
+                if current is None:
+                    files[GAME_PATH] = games.mark_fallback(self._template_game(line))  # keeps main playable; not an AI base
+                    self.log(conn, user_id, "TEMPLATE FALLBACK", f"{line['title']} · AI가 만든 게임이 아직 없어 비상용 템플릿으로 main을 채움 (다음 게임 작업은 다시 백지에서 시작)", line["id"])
         if task["artifact"] == "release/index.html":
             files[path] = self.current_game(ws, line)
             files["release/NOTES.md"] = text

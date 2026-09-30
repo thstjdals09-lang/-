@@ -33,14 +33,16 @@ def build_adapter(entry: dict, *, secret: str | None = None, endpoint: str | Non
     if entry.get("adapter_status") == "planned":
         raise AdapterUnavailable(f"{entry['id']} adapter is planned")
     model = model or entry.get("default_model")
+    # Local models on consumer GPUs can take minutes to write a whole game.
+    timeout = 900 if "local" in entry.get("auth_types", []) else 120
     if adapter == "gemini":
-        return GeminiAdapter(base_url=entry["base_url"], secret=secret, model=model, transport=transport)
+        return GeminiAdapter(base_url=entry["base_url"], secret=secret, model=model, transport=transport, timeout=timeout)
     if adapter == "cloudflare":
-        return CloudflareAdapter(base_url=entry["base_url"], account_id=endpoint, secret=secret, model=model, transport=transport)
+        return CloudflareAdapter(base_url=entry["base_url"], account_id=endpoint, secret=secret, model=model, transport=transport, timeout=timeout)
     if adapter == "openai_compatible":
         base_url = endpoint or entry.get("base_url")
         if not base_url:
             raise ValueError("endpoint is required for " + entry["id"])
         cls = OpenRouterAdapter if entry["id"] == "openrouter" else OpenAICompatibleAdapter
-        return cls(base_url=base_url, secret=secret, model=model, transport=transport)
+        return cls(base_url=base_url, secret=secret, model=model, transport=transport, timeout=timeout)
     raise AdapterUnavailable(f"no adapter for {adapter}")

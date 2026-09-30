@@ -70,10 +70,14 @@ def critique_prompt(role: str, focus: list[str], criteria: list[dict], concepts:
 
 def _normalise(raw) -> list[dict]:
     items = raw if isinstance(raw, list) else (raw or {}).get("concepts") if isinstance(raw, dict) else None
-    out = []
+    out, seen = [], set()
     for item in items or []:
         if not isinstance(item, dict) or not item.get("title"):
             continue
+        key = re.sub(r"\W+", "", str(item["title"]).lower())
+        if key in seen:  # models sometimes repeat a concept under the same name
+            continue
+        seen.add(key)
         loop = [str(x) for x in (item.get("loop") or []) if str(x).strip()][:6] or ["관찰", "선택", "결과", "성장"]
         family = str(item.get("family", "")).lower()
         out.append({

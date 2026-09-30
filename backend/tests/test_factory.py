@@ -239,3 +239,57 @@ def test_wave_runs_provider_calls_in_parallel(signed_in, http):
     assert live["peak"] >= 2
     tasks = signed_in.get(f"/lines/{line_id}").json()["stages"]["greenlight"]["tasks"]
     assert sum(t["status"] == "completed" for t in tasks) == 3
+
+
+def _prompt_recorder(game_reply):
+    prompts = []
+
+    def chat(req):
+        prompt = json.loads(req.content)["messages"][-1]["content"]
+        prompts.append(prompt)
+        text = "notes\n" + game_reply(prompt) if "# Game deliverable" in prompt else "ok\nRESULT: PASS"
+        return httpx.Response(200, json={"choices": [{"message": {"content": text}}]})
+    return chat, prompts
+
+
+def _run_to_build(signed_in, topic, count=2):
+    signed_in.post("/projects", json={"topic": topic}, headers=CSRF)
+    line_id = _lines(signed_in)[0]["id"]
+    for _ in range(90):
+        signed_in.post(f"/lines/{line_id}/tick", headers=CSRF)
+        detail = signed_in.get(f"/lines/{line_id}").json()
+        if len(detail["builds"]) >= count:
+            return line_id, detail
+    raise AssertionError("not enough builds")
+
+
+def test_fallback_template_is_never_the_base_for_ai_game_work(signed_in, http):
+    _connect(signed_in, http, "groq", "api.groq.com/openai/v1/models", {"data": [{"id": "llama"}]})
+    chat, prompts = _prompt_recorder(lambda p: "```html\n<!doctype html><body>broken, no entry point</body>\n```")
+    http.add("POST", "chat/completions", chat)
+    _run_to_build(signed_in, "좀비")
+    game_prompts = [p for p in prompts if "# Game deliverable" in p]
+    assert len(game_prompts) >= 2
+    assert all("No game exists yet" in p and "# Current game source" not in p for p in game_prompts)
+    assert any(l["type"] == "TEMPLATE FALLBACK" for l in signed_in.get("/logs").json())
+
+
+def test_template_echo_is_rejected_and_marker_is_added_to_real_games(signed_in, http, settings):
+    from app.factory import games
+
+    _connect(signed_in, http, "groq", "api.groq.com/openai/v1/models", {"data": [{"id": "llama"}]})
+    template = games.render(settings.catalog_dir, title="t", topic="x", game_type="Survivor")
+    own = "<html><body><canvas></canvas><script>function startGame(){window.OWN_GAME=1}</script><p>OWN-GAME</p></body></html>"
+    calls = {"n": 0}
+
+    def reply(prompt):
+        calls["n"] += 1
+        return "```html\n" + (template if calls["n"] == 1 else own) + "\n```"
+
+    chat, _ = _prompt_recorder(reply)
+    http.add("POST", "chat/completions", chat)
+    line_id, detail = _run_to_build(signed_in, "좀비")
+    logs = signed_in.get("/logs").json()
+    assert any(l["type"] == "GAME REJECTED" and "템플릿" in l["text"] for l in logs)
+    html = signed_in.get(f"/builds/{detail['builds'][0]['id']}/play").text
+    assert "OWN-GAME" in html and 'data-ai-factory-game="v2"' in html and not games.is_fallback(html)
