@@ -1,38 +1,12 @@
 from __future__ import annotations
 
 import json
-import sqlite3
-from pathlib import Path
 
+from .db import connect, migrate
 from .domain import AIEmployee, AIEmployeeCreate, RoutingDecision, TaskCreate
 
-DB_PATH = Path("data/ai_factory.sqlite3")
-
-
-def connect() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
 def init_db() -> None:
-    with connect() as conn:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS employees (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                payload TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS routing_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                task_payload TEXT NOT NULL,
-                decision_payload TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-            """
-        )
+    migrate()
 
 
 def list_employees() -> list[AIEmployee]:
