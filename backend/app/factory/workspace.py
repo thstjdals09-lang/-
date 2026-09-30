@@ -59,7 +59,8 @@ class LineWorkspace:
         cmd = ["git", "-c", f"user.name={author}", "-c", "user.email=ai-factory@localhost", "-c", "core.autocrlf=false", "-c", "core.longpaths=true", *args]
         res = subprocess.run(cmd, cwd=cwd or self.repo, env=env, capture_output=True, text=True, encoding="utf-8")
         if res.returncode != 0:
-            raise WorkspaceError(f"git {' '.join(args[:2])} failed: {res.stderr.strip()[:300]}")
+            detail = (res.stderr.strip() or res.stdout.strip())[:300]
+            raise WorkspaceError(f"git {' '.join(args[:2])} failed: {detail}")
         return res.stdout.strip()
 
     def ensure(self, title: str) -> None:
@@ -96,10 +97,8 @@ class LineWorkspace:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(content, encoding="utf-8")
             self._git("add", "-A", cwd=tree)
-            if not self._git("status", "--porcelain", cwd=tree):
-                (tree / ".ai-factory-touch").write_text(branch, encoding="utf-8")
-                self._git("add", "-A", cwd=tree)
-            self._git("commit", "-q", "-m", message, cwd=tree, author=author)
+            # A task whose output equals what main already has still gets its own commit.
+            self._git("commit", "-q", "--allow-empty", "-m", message, cwd=tree, author=author)
             sha = self._git("rev-parse", "HEAD", cwd=tree)
             self._git("merge", "-q", "--no-ff", "-X", "theirs", "-m", f"merge {branch}", branch, author="AI Factory Leader")
             merged = self._git("rev-parse", "HEAD")
