@@ -48,7 +48,12 @@ def get_factory(app) -> Factory:
         app.state.factory = Factory(s.catalog_dir, s.workspace_dir, simulate=s.simulate_without_providers, transport=getattr(app.state, "http_transport", None),
                                     github=getattr(app.state, "github_sync", None),
                                     verifier=getattr(app.state, "pages_verifier", None))
-    return app.state.factory
+    f = app.state.factory
+    # Overrides set after startup (tests, single-tenant setups) must still apply to the cached factory.
+    f.transport = getattr(app.state, "http_transport", None)
+    f.github = getattr(app.state, "github_sync", None)
+    f.verifier = getattr(app.state, "pages_verifier", None)
+    return f
 
 
 def _owned_line(conn, user_id, line_id):
