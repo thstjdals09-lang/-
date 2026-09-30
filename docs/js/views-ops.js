@@ -108,17 +108,33 @@ export function settings(app) {
 
 export function login(app) {
   const s = app.state.settings;
+  const info = app.ui.serverInfo || {};
+  const online = !!info.online;
+  const mode = app.ui.authMode === "register" ? "register" : "login";
   const flash = app.ui.loginFlash ? '<p class="notice">' + esc(app.ui.loginFlash) + "</p>" : "";
+  const accountForm =
+    '<div class="segmented"><button type="button" class="' + (mode === "login" ? "on" : "") + '" data-action="auth-mode" data-id="login">로그인</button>' +
+    '<button type="button" class="' + (mode === "register" ? "on" : "") + '" data-action="auth-mode" data-id="register">회원가입</button></div>' +
+    '<form class="form" data-form="' + (mode === "register" ? "register" : "password-login") + '">' +
+    (mode === "register" ? '<label>이름 (선택)<input name="name" maxlength="60" autocomplete="nickname"></label>' : "") +
+    '<label>이메일<input name="email" type="email" required autocomplete="email"></label>' +
+    '<label>비밀번호' + (mode === "register" ? " (8자 이상)" : "") + '<input name="password" type="password" required minlength="' + (mode === "register" ? 8 : 1) + '" autocomplete="' + (mode === "register" ? "new-password" : "current-password") + '"></label>' +
+    '<button class="btn primary">' + (mode === "register" ? "계정 만들기" : "로그인") + "</button>" +
+    '<p class="status" data-auth-status></p></form>';
   return (
     '<div class="loginShell"><div class="loginCard">' +
     '<div class="brandMark big" aria-hidden="true">AF</div><div class="eyebrow">AI FACTORY · GAME STUDIO OS</div>' +
-    "<h1>로그인</h1><p>계정마다 자기 AI(키), 프로젝트, 생산라인, 게임 배포가 따로 관리됩니다. 처음 로그인하면 계정이 만들어집니다.</p>" + flash +
-    '<button class="googleBtn" data-action="google-login"><span aria-hidden="true">G</span> Google 계정으로 로그인</button>' +
-    '<p class="status" data-login-status>' + (s.backendUrl ? "서버: " + esc(s.backendUrl) : "계정 로그인은 AI Factory 서버에서 합니다. 아래에 서버 주소를 넣거나, 이 PC에서 start-backend.cmd를 실행하세요.") + "</p>" +
-    '<details' + (s.backendUrl ? "" : " open") + '><summary>AI Factory 서버 주소</summary><form class="inlineForm" data-form="login-backend"><input name="backendUrl" type="url" placeholder="https://my-factory.example.com" value="' + esc(s.backendUrl || "") + '"><button class="btn">저장</button></form></details>' +
+    "<h1>" + (mode === "register" ? "회원가입" : "로그인") + "</h1>" +
+    "<p>계정마다 자기 AI(키), 프로젝트, 생산라인, 게임 배포가 따로 관리됩니다.</p>" + flash +
+    (online
+      ? accountForm +
+        (info.google ? '<button class="googleBtn" data-action="google-login"><span aria-hidden="true">G</span> Google 계정으로 로그인</button>' : "") +
+        (info.dev_login ? '<button class="btn ghost" data-action="google-login">개발용 이메일 로그인 (이 PC 전용)</button>' : "")
+      : '<p class="notice">' + (s.backendUrl ? "AI Factory 서버(" + esc(s.backendUrl) + ")에 연결할 수 없습니다." : "AI Factory 서버가 꺼져 있습니다.") +
+        " 서버를 운영하는 PC에서 <strong>start-public.cmd</strong>를 실행하면 이 링크로 로그인할 수 있습니다.</p>" +
+        '<details><summary>서버 주소 직접 입력</summary><form class="inlineForm" data-form="login-backend"><input name="backendUrl" type="url" placeholder="https://….trycloudflare.com" value="' + esc(s.backendUrl || "") + '"><button class="btn">연결</button></form></details>') +
     '<div class="divider"><span>또는</span></div>' +
     '<button class="btn ghost" data-action="preview-login">게스트로 둘러보기 (계정 없음 · 시뮬레이션)</button>' +
-    '<p class="muted small">게스트 모드는 이 브라우저에만 저장되고, 실제 AI를 연결하거나 게임을 배포할 수 없습니다.</p>' +
     "</div></div>"
   );
 }
@@ -142,7 +158,7 @@ export function account(app) {
     '<div class="twoCol">' +
     '<section class="panel"><div class="panelHead"><div><div class="eyebrow">PROFILE</div><h2>' + esc(a.name || a.email) + "</h2></div>" +
     '<span class="pill ' + (a.role === "admin" ? "violet" : "neutral") + '">' + (a.role === "admin" ? "관리자" : "멤버") + "</span></div>" +
-    '<dl class="facts compact">' + stat("이메일", esc(a.email)) + stat("로그인 방식", a.signIn === "google" ? "Google" : "로컬(개발용)") +
+    '<dl class="facts compact">' + stat("이메일", esc(a.email)) + stat("로그인 방식", a.signIn === "google" ? "Google" : a.signIn === "password" ? "이메일·비밀번호" : "로컬(개발용)") +
     stat("가입", esc(fmtTime(parseServerTime(a.createdAt)))) + stat("최근 로그인", esc(fmtTime(parseServerTime(a.lastLoginAt)))) + "</dl></section>" +
     '<section class="panel"><div class="eyebrow">MY FACTORY</div><h2>내 사용 현황</h2><dl class="facts">' +
     stat("연결한 AI", c.ais + " (온라인 " + c.ais_online + ")") + stat("프로젝트", c.projects) + stat("생산라인", c.lines + " (가동 " + c.running + ")") +

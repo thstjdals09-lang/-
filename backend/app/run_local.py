@@ -29,6 +29,8 @@ AI_FACTORY_WORKSPACE=data/workspaces
 # Optional: Google login (OAuth client, redirect URI http://127.0.0.1:8000/auth/google/callback)
 AI_FACTORY_GOOGLE_CLIENT_ID=
 AI_FACTORY_GOOGLE_CLIENT_SECRET=
+# Owner accounts: may connect this PC's local AIs on a public server and use the server GitHub token.
+AI_FACTORY_ADMIN_EMAILS=
 # Optional: GitHub token (repo scope) to create aif-* repositories and Pages links
 AI_FACTORY_GITHUB_TOKEN=
 """

@@ -92,6 +92,7 @@ async function refreshAccount() {
 }
 
 function leaveRemote() {
+  app.ui.authMode = "login";
   if (previewState) app.state = previewState;
   previewState = null;
   app.state.user = { signedIn: false, mode: null, email: null, name: null };
@@ -298,6 +299,7 @@ const actions = {
     app.ui.tab = "dashboard";
     commit({ full: true });
   },
+  "auth-mode"(mode) { app.ui.authMode = mode; render(); },
   "preview-login"() {
     app.state.user = { signedIn: true, mode: "preview", email: "preview@local", name: "CEO (Preview)" };
     addLog(app.state, app.ctx, "AUTH", "프리뷰 세션 시작 · 서버·자격증명 없이 브라우저 시뮬레이션");
@@ -380,6 +382,20 @@ const remoteActions = {
   },
 };
 
+async function signedIn(user) {
+  app.ui.loginFlash = null;
+  await enterRemote(user);
+  commit({ full: true });
+}
+
+const authErrors = {
+  invalid_credentials: "이메일 또는 비밀번호가 올바르지 않습니다.",
+  too_many_attempts: "로그인 시도가 너무 많습니다. 15분 뒤에 다시 시도하세요.",
+  email_taken: "이미 가입된 이메일입니다. 로그인하세요.",
+  invalid_email: "이메일 형식이 올바르지 않습니다.",
+  signup_not_allowed: "이 서버는 초대된 이메일만 가입할 수 있습니다.",
+};
+
 const remoteForms = {
   async "github-connect"(form) {
     const input = form.querySelector('input[name="token"]');
@@ -436,6 +452,26 @@ const remoteForms = {
 };
 
 const forms = {
+  async "password-login"(form) {
+    const fd = new FormData(form);
+    const status = form.querySelector("[data-auth-status]");
+    status.textContent = "로그인 중…";
+    try {
+      await signedIn(await api.passwordLogin(String(fd.get("email")).trim(), String(fd.get("password"))));
+    } catch (err) {
+      status.textContent = authErrors[err.detail] || "로그인 실패: " + (err.detail || err.message);
+    }
+  },
+  async register(form) {
+    const fd = new FormData(form);
+    const status = form.querySelector("[data-auth-status]");
+    status.textContent = "계정 만드는 중…";
+    try {
+      await signedIn(await api.register(String(fd.get("email")).trim(), String(fd.get("password")), String(fd.get("name") || "").trim()));
+    } catch (err) {
+      status.textContent = authErrors[err.detail] || (err.status === 422 ? "비밀번호는 8자 이상이어야 합니다." : "가입 실패: " + (err.detail || err.message));
+    }
+  },
   topic(form) {
     const fd = new FormData(form);
     const topic = String(fd.get("topic") || "").trim();
@@ -482,9 +518,10 @@ const forms = {
       status.textContent = "연결 실패: " + err.detail;
     }
   },
-  "login-backend"(form) {
+  async "login-backend"(form) {
     app.state.settings.backendUrl = String(new FormData(form).get("backendUrl") || "").trim();
     save();
+    await probeServer();
     render();
   },
   async connect(form) {
@@ -624,6 +661,30 @@ async function tick() {
   else renderNav();
 }
 
+// The Pages link forwards to the live server announced in backend.json (written by start-public.cmd).
+async function discoverServer() {
+  if (location.pathname.startsWith("/console") || /[?&]preview=1/.test(location.search)) return false;
+  try {
+    const info = await fetch("./backend.json?t=" + Date.now(), { cache: "no-store" }).then((r) => (r.ok ? r.json() : null));
+    if (!info || !info.url) return false;
+    const res = await fetch(info.url.replace(/\/+$/, "") + "/health", { cache: "no-store" });
+    if (!res.ok) return false;
+    location.replace(info.url.replace(/\/+$/, "") + "/console/");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function probeServer() {
+  app.ui.serverInfo = { online: false };
+  if (!api.configured()) return;
+  try {
+    const health = await api.health();
+    app.ui.serverInfo = { online: true, google: !!health.google_oauth, dev_login: !!health.dev_login };
+  } catch { /* offline: the login screen says so */ }
+}
+
 async function restoreBackendSession() {
   if (app.state.user.mode === "backend") app.state.user = { signedIn: false, mode: null, email: null, name: null };
   if (api.configured()) {
@@ -660,6 +721,8 @@ async function boot() {
   app.state = saved && saved.version === STATE_VERSION ? saved : createState(app.ctx);
   if (!app.state.settings.backendUrl && location.pathname.startsWith("/console")) app.state.settings.backendUrl = location.origin;
   app.ui = Object.assign({ tab: "dashboard", lineId: null, marketFilter: "recommended" }, readJson(UI_KEY) || {});
+  if (await discoverServer()) return; // navigating to the live server
+  await probeServer();
   await restoreBackendSession();
   bindEvents();
   render();

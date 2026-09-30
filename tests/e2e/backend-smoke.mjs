@@ -49,7 +49,11 @@ try {
   page.on("pageerror", (e) => failures.push("pageerror: " + e.message));
   page.on("dialog", (d) => (d.type() === "prompt" ? d.accept("ceo@localhost") : d.accept()));
   await page.goto(origin + "/console/");
-  await page.getByRole("button", { name: /Google 계정으로 로그인/ }).click();
+  // real account flow: sign up with email + password
+  await page.getByRole("button", { name: "회원가입" }).click();
+  await page.locator('input[name="email"]').fill("ceo@localhost.dev");
+  await page.locator('input[name="password"]').fill("factory-pass-123");
+  await page.getByRole("button", { name: "계정 만들기" }).click();
   await page.waitForSelector(".sidebarFoot >> text=Backend 연결");
 
   await page.locator("#topicForm input[name=topic]").fill("좀비");
@@ -82,14 +86,20 @@ try {
 
   await page.locator(".accountChip").click();
   await page.waitForSelector("text=내 사용 현황");
-  check(await page.getByText("ceo@localhost").first().isVisible(), "account page shows the signed-in email");
+  check(await page.getByText("ceo@localhost.dev").first().isVisible(), "account page shows the signed-in email");
+  check(await page.getByText("이메일·비밀번호").isVisible(), "sign-in method is email + password");
   check(await page.getByText("미연결").first().isVisible(), "personal GitHub starts disconnected");
   if (shots) await page.screenshot({ path: join(shots, "backend-account.png"), fullPage: true });
   await page.locator(".nav").getByRole("button", { name: "로그" }).click();
   check((await page.locator(".logList li").count()) > 10, "server logs should be listed");
   await page.locator(".accountChip").click();
   await page.getByRole("button", { name: "로그아웃", exact: true }).click();
-  await page.waitForSelector("text=Google 계정으로 로그인");
+  await page.waitForSelector('form[data-form="password-login"]');
+  // sign back in with the password
+  await page.locator('input[name="email"]').fill("ceo@localhost.dev");
+  await page.locator('input[name="password"]').fill("factory-pass-123");
+  await page.locator('form[data-form="password-login"] button').click();
+  await page.waitForSelector(".sidebarFoot >> text=Backend 연결");
 } catch (err) {
   failures.push("step failed: " + err.message.split("\n").slice(0, 3).join(" | "));
   try {

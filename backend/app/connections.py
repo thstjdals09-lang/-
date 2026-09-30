@@ -166,9 +166,15 @@ def create_connection(payload: ConnectionCreate, request: Request, user: User = 
         raise HTTPException(status_code=400, detail="api_key_required")
     if payload.api_key and not vault.configured():
         raise HTTPException(status_code=503, detail="vault_not_configured")
+    endpoint = payload.endpoint
+    if payload.auth_type in ("local", "custom_endpoint") and not settings.is_local and user.role != "admin":
+        # These make the server call an arbitrary address (this PC, the LAN): owner only on a public server.
+        raise HTTPException(status_code=403, detail="local_endpoints_admin_only")
+    if payload.auth_type == "api_key" and entry.get("adapter") == "openai_compatible":
+        endpoint = None  # hosted providers always use their catalog address (no user-chosen URLs)
     with db.transaction() as conn:
         row = install_connection(conn, user.id, entry, auth_type=payload.auth_type, secret=(payload.api_key or "").strip() or None,
-                                 endpoint=payload.endpoint, model=payload.model, reserve=payload.reserve,
+                                 endpoint=endpoint, model=payload.model, reserve=payload.reserve,
                                  transport=getattr(request.app.state, "http_transport", None))
         return row_to_out(conn, row)
 

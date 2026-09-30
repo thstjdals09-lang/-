@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
+import re
+import threading
 import json
 import secrets
 import sqlite3
@@ -43,6 +46,17 @@ class User(BaseModel):
 class SignupClosed(HTTPException):
     def __init__(self):
         super().__init__(status_code=403, detail="signup_not_allowed")
+
+
+class PasswordSignup(BaseModel):
+    email: str = Field(min_length=3, max_length=200)
+    password: str = Field(min_length=8, max_length=128)
+    name: str | None = Field(default=None, max_length=60)
+
+
+class PasswordLogin(BaseModel):
+    email: str = Field(min_length=3, max_length=200)
+    password: str = Field(min_length=1, max_length=128)
 
 
 class DevLogin(BaseModel):
@@ -99,6 +113,52 @@ def upsert_user(conn: sqlite3.Connection, *, email: str, name: str | None, pictu
             (google_sub, name, picture, _iso(_now()), role, user_id),
         )
     return User(id=user_id, email=email, name=name, picture=picture, role=role)
+
+
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+SCRYPT = {"n": 2 ** 14, "r": 8, "p": 1, "dklen": 32}
+
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    digest = hashlib.scrypt(password.encode(), salt=salt, **SCRYPT)
+    return "scrypt$" + base64.b64encode(salt).decode() + "$" + base64.b64encode(digest).decode()
+
+
+def verify_password(password: str, stored: str | None) -> bool:
+    if not stored or not stored.startswith("scrypt$"):
+        return False
+    _, salt_b64, digest_b64 = stored.split("$", 2)
+    digest = hashlib.scrypt(password.encode(), salt=base64.b64decode(salt_b64), **SCRYPT)
+    return hmac.compare_digest(digest, base64.b64decode(digest_b64))
+
+
+class LoginThrottle:
+    """At most `limit` failed sign-ins per email and per client address in `window` seconds."""
+
+    def __init__(self, limit: int = 8, window: int = 900):
+        self.limit, self.window = limit, window
+        self.failures: dict[str, list[float]] = {}
+        self.lock = threading.Lock()
+
+    def _recent(self, key: str) -> list[float]:
+        now = time.time()
+        items = [t for t in self.failures.get(key, []) if now - t < self.window]
+        self.failures[key] = items
+        return items
+
+    def check(self, *keys: str) -> None:
+        with self.lock:
+            if any(len(self._recent(k)) >= self.limit for k in keys):
+                raise HTTPException(status_code=429, detail="too_many_attempts")
+
+    def fail(self, *keys: str) -> None:
+        with self.lock:
+            for k in keys:
+                self._recent(k).append(time.time())
+
+
+throttle = LoginThrottle()
 
 
 def create_session(conn: sqlite3.Connection, user_id: str, settings: config.Settings) -> str:
@@ -177,7 +237,7 @@ def validate_id_token(id_token: str, client_id: str, now: float | None = None) -
 @router.get("/config")
 def auth_config(request: Request) -> dict:
     s: config.Settings = request.app.state.settings
-    return {"google": s.google_configured, "dev_login": s.dev_login, "signup": s.signup_mode}
+    return {"google": s.google_configured, "password": True, "dev_login": s.dev_login, "signup": s.signup_mode}
 
 
 @router.get("/google/login")
@@ -243,6 +303,40 @@ def google_callback(request: Request, state: str, code: str | None = None, error
     response = RedirectResponse(row["return_to"] + "?login=ok", status_code=302)
     set_session_cookie(response, token, s)
     return response
+
+
+@router.post("/register", dependencies=[Depends(csrf_guard)])
+def register(payload: PasswordSignup, request: Request, response: Response) -> User:
+    """Email + password sign-up (works without any external identity provider)."""
+    s: config.Settings = request.app.state.settings
+    email = payload.email.strip().lower()
+    if not EMAIL_RE.match(email):
+        raise HTTPException(status_code=400, detail="invalid_email")
+    with db.transaction() as conn:
+        if conn.execute("SELECT 1 FROM users WHERE email=?", (email,)).fetchone():
+            raise HTTPException(status_code=409, detail="email_taken")
+        user = upsert_user(conn, email=email, name=payload.name or email.split("@")[0], picture=None, google_sub=None, settings=s)
+        conn.execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(payload.password), user.id))
+        token = create_session(conn, user.id, s)
+    set_session_cookie(response, token, s)
+    return user
+
+
+@router.post("/login", dependencies=[Depends(csrf_guard)])
+def password_login(payload: PasswordLogin, request: Request, response: Response) -> User:
+    s: config.Settings = request.app.state.settings
+    email = payload.email.strip().lower()
+    client = "ip:" + (request.client.host if request.client else "?")
+    throttle.check("email:" + email, client)
+    with db.transaction() as conn:
+        row = conn.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
+        if row is None or not verify_password(payload.password, row["password_hash"]):
+            throttle.fail("email:" + email, client)
+            raise HTTPException(status_code=401, detail="invalid_credentials")
+        conn.execute("UPDATE users SET last_login_at=? WHERE id=?", (_iso(_now()), row["id"]))
+        token = create_session(conn, row["id"], s)
+    set_session_cookie(response, token, s)
+    return User(id=row["id"], email=row["email"], name=row["name"], picture=row["picture"], role=row["role"])
 
 
 @router.post("/dev-login", dependencies=[Depends(csrf_guard)])

@@ -295,6 +295,10 @@ MIGRATIONS: list[str] = [
     ALTER TABLE users ADD COLUMN github_credential_id TEXT;
     ALTER TABLE users ADD COLUMN github_login TEXT;
     """,
+    # 8 — email + password sign-in (scrypt hashes).
+    """
+    ALTER TABLE users ADD COLUMN password_hash TEXT;
+    """,
 ]
 
 

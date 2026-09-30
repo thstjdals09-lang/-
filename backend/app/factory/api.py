@@ -141,6 +141,10 @@ def patch_settings(payload: SettingsPatch, request: Request, user: User = Depend
     with db.transaction() as conn:
         current = factory(request).user_settings(conn, user.id)
         current.update({k: v for k, v in payload.model_dump().items() if v is not None})
+        if not request.app.state.settings.is_local and user.role != "admin":
+            # shared server: keep one member from occupying every worker
+            current["max_parallel"] = min(current["max_parallel"], 3)
+            current["workers_per_line"] = min(current["workers_per_line"], 3)
         stored = {k: current[k] for k in DEFAULT_USER_SETTINGS}
         conn.execute("UPDATE users SET settings=? WHERE id=?", (json.dumps(stored), user.id))
         return stored

@@ -44,6 +44,8 @@ export function createApi(getBase) {
     health: () => req("/health", { timeout: 4000 }),
     me: () => req("/auth/me"),
     logout: () => req("/auth/logout", { method: "POST" }),
+    register: (email, password, name) => req("/auth/register", { method: "POST", body: { email, password, name: name || null } }),
+    passwordLogin: (email, password) => req("/auth/login", { method: "POST", body: { email, password } }),
     devLogin: (email) => req("/auth/dev-login", { method: "POST", body: { email, name: email.split("@")[0] } }),
     account: () => req("/account"),
     connectGithub: (token) => req("/account/github", { method: "PUT", body: { token }, timeout: 20000 }),

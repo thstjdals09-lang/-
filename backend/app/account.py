@@ -55,7 +55,7 @@ def profile(conn, user_id: str) -> dict:
     return {
         "id": row["id"], "email": row["email"], "name": row["name"], "picture": row["picture"], "role": row["role"],
         "createdAt": row["created_at"], "lastLoginAt": row["last_login_at"],
-        "signIn": "google" if row["google_sub"] else "local",
+        "signIn": "google" if row["google_sub"] else "password" if row["password_hash"] else "local",
         "github": {"connected": bool(row["github_credential_id"]), "login": row["github_login"]},
         "counts": _counts(conn, user_id),
     }
