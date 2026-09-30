@@ -80,7 +80,7 @@
       "id": "prototype", "name": "Playable Prototype", "summary": "핵심 재미를 증명하는 최소 플레이 버전", "build": "0.1.0",
       "tasks": [
         {"id": "scaffold", "name": "저장소·빌드 골격", "role": "Build Engineer", "kind": "coding", "difficulty": 1, "depends": [], "artifact": "src/"},
-        {"id": "core", "name": "핵심 루프 구현", "role": "Gameplay Programmer", "kind": "coding", "difficulty": 2, "depends": ["scaffold"], "artifact": "src/game.js"},
+        {"id": "core", "name": "핵심 루프 구현", "role": "Gameplay Programmer", "kind": "coding", "difficulty": 2, "depends": ["scaffold"], "artifact": "src/game.js", "game": true},
         {"id": "state", "name": "입력·상태 머신", "role": "Systems Programmer", "kind": "coding", "difficulty": 2, "depends": ["scaffold"], "artifact": "src/state.js"},
         {"id": "hud", "name": "임시 UI/HUD", "role": "UI/UX", "kind": "coding", "difficulty": 1, "depends": ["core"], "artifact": "src/hud.js"},
         {"id": "playtest", "name": "프로토타입 플레이테스트", "role": "QA", "kind": "qa", "difficulty": 1, "depends": ["core", "state", "hud"], "artifact": "prototype-findings.md"},
@@ -90,7 +90,7 @@
     {
       "id": "vertical", "name": "Vertical Slice", "summary": "최종 품질에 가까운 대표 구간 제작", "build": "0.5.0",
       "tasks": [
-        {"id": "feature", "name": "대표 구간 기능 완성", "role": "Gameplay Programmer", "kind": "coding", "difficulty": 2, "depends": [], "artifact": "src/slice.js"},
+        {"id": "feature", "name": "대표 구간 기능 완성", "role": "Gameplay Programmer", "kind": "coding", "difficulty": 2, "depends": [], "artifact": "src/slice.js", "game": true},
         {"id": "artpass", "name": "최종 품질 아트 패스", "role": "Art Director", "kind": "design", "difficulty": 2, "depends": [], "artifact": "assets/slice/"},
         {"id": "ui", "name": "UI 폴리시", "role": "UI/UX", "kind": "design", "difficulty": 2, "depends": ["feature"], "artifact": "src/ui.css"},
         {"id": "build", "name": "슬라이스 통합 빌드", "role": "Build Engineer", "kind": "coding", "difficulty": 1, "depends": ["feature", "artpass", "ui"], "artifact": "vertical-slice.zip"},
@@ -102,7 +102,7 @@
       "id": "production", "name": "Full Production", "summary": "기능·콘텐츠·도구·저장·UI 본개발",
       "tasks": [
         {"id": "content", "name": "콘텐츠 제작", "role": "Game Designer", "kind": "planning", "difficulty": 1, "depends": [], "artifact": "content.json"},
-        {"id": "systems", "name": "진행 시스템 구현", "role": "Systems Programmer", "kind": "coding", "difficulty": 2, "depends": [], "artifact": "src/progression.js"},
+        {"id": "systems", "name": "진행 시스템 구현", "role": "Systems Programmer", "kind": "coding", "difficulty": 2, "depends": [], "artifact": "src/progression.js", "game": true},
         {"id": "save", "name": "저장/불러오기", "role": "Systems Programmer", "kind": "coding", "difficulty": 2, "depends": ["systems"], "artifact": "src/save.js"},
         {"id": "screens", "name": "메뉴·설정 화면", "role": "UI/UX", "kind": "coding", "difficulty": 1, "depends": [], "artifact": "src/screens.js"},
         {"id": "assets", "name": "아트 에셋 제작", "role": "Art Director", "kind": "design", "difficulty": 1, "depends": [], "artifact": "assets/"},
@@ -116,7 +116,7 @@
         {"id": "functional", "name": "기능 테스트", "role": "QA", "kind": "qa", "difficulty": 1, "depends": [], "artifact": "qa-report.md"},
         {"id": "regression", "name": "회귀 테스트", "role": "QA", "kind": "qa", "difficulty": 1, "depends": [], "artifact": "regression-report.json"},
         {"id": "perf", "name": "성능 프로파일링", "role": "Technical Director", "kind": "debugging", "difficulty": 2, "depends": [], "artifact": "perf-report.md"},
-        {"id": "fix", "name": "버그 수정", "role": "Gameplay Programmer", "kind": "debugging", "difficulty": 2, "depends": ["functional", "regression", "perf"], "artifact": "fixes.patch"},
+        {"id": "fix", "name": "버그 수정", "role": "Gameplay Programmer", "kind": "debugging", "difficulty": 2, "depends": ["functional", "regression", "perf"], "artifact": "fixes.patch", "game": true},
         {"id": "ci", "name": "통합 CI 빌드", "role": "Build Engineer", "kind": "coding", "difficulty": 1, "depends": ["fix"], "artifact": "ci-build.log"}
       ]
     },
@@ -124,7 +124,7 @@
       "id": "alpha", "name": "Alpha", "summary": "기능 완성도 확보·안정화", "build": "0.8.0",
       "tasks": [
         {"id": "checklist", "name": "기능 완성 체크리스트", "role": "Producer", "kind": "planning", "difficulty": 1, "depends": [], "artifact": "feature-complete.md"},
-        {"id": "stabilize", "name": "안정화 수정", "role": "Gameplay Programmer", "kind": "debugging", "difficulty": 2, "depends": ["checklist"], "artifact": "stabilization.patch"},
+        {"id": "stabilize", "name": "안정화 수정", "role": "Gameplay Programmer", "kind": "debugging", "difficulty": 2, "depends": ["checklist"], "artifact": "stabilization.patch", "game": true},
         {"id": "build", "name": "Alpha 빌드", "role": "Build Engineer", "kind": "coding", "difficulty": 1, "depends": ["stabilize"], "artifact": "alpha-build.zip"},
         {"id": "pass", "name": "Alpha QA 패스", "role": "QA", "kind": "qa", "difficulty": 1, "depends": ["build"], "artifact": "alpha-qa.md"}
       ]

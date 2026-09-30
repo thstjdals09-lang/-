@@ -30,6 +30,16 @@ class TaskContext:
     artifact: str
     dependencies: dict[str, str] = field(default_factory=dict)
     feedback: list[str] = field(default_factory=list)
+    game_source: str | None = None  # set for tasks that must return the updated game
+
+
+GAME_RULES = (
+    "Return the COMPLETE updated game as ONE self-contained HTML file inside a single ```html code block, "
+    "after your notes. Hard requirements: starts with <!doctype html>; <body data-ai-factory-game=\"v2\">; "
+    "a global function startGame() that (re)starts play; no external scripts, stylesheets, fonts, images or network "
+    "requests (inline everything, draw with canvas/CSS); runs offline inside a sandboxed iframe; keyboard and pointer "
+    "controls; visible score, win/lose state and restart; Korean UI text; responsive down to 360px wide."
+)
 
 
 def build_prompt(ctx: TaskContext) -> ExecuteRequest:
@@ -51,7 +61,20 @@ def build_prompt(ctx: TaskContext) -> ExecuteRequest:
         f"# Inputs from completed dependencies\n{deps}\n\n# CEO feedback to honour\n{feedback}\n"
     )
     max_tokens = 3000 if ctx.kind in ("coding", "debugging") else 1600
+    if ctx.game_source is not None:
+        prompt += f"\n# Game deliverable\n{GAME_RULES}\n\n# Current game source\n```html\n{ctx.game_source[:60000]}\n```\n"
+        max_tokens = 12000
     return ExecuteRequest(prompt=prompt, system=system, max_tokens=max_tokens)
+
+
+_HTML_BLOCK = re.compile(r"```html\s*\n(.*?)```", re.S | re.I)
+
+
+def extract_game(text: str) -> str | None:
+    """Returns the last complete HTML document the model produced, if any."""
+    blocks = [b.strip() for b in _HTML_BLOCK.findall(text or "")]
+    docs = [b for b in blocks if b.lower().startswith("<!doctype html")]
+    return docs[-1] + "\n" if docs else None
 
 
 def simulate(ctx: TaskContext) -> str:

@@ -173,3 +173,42 @@ def test_state_snapshot_and_autopilot_pass(signed_in, client):
     line_id = snap["lines"][0]["id"]
     signed_in.post(f"/lines/{line_id}/autopilot", json={"on": False}, headers=CSRF)
     assert autopilot_pass(get_factory(client.app)) == 2
+
+
+VALID_GAME = """```html
+<!doctype html><html><body data-ai-factory-game="v2"><h1>GENERATED-BY-MODEL</h1>
+<script>function startGame(){document.body.dataset.started="1"}startGame()</script></body></html>
+```"""
+
+
+def _game_writer(game_block):
+    def chat(req):
+        prompt = json.loads(req.content)["messages"][-1]["content"]
+        text = "notes\n" + game_block if "# Game deliverable" in prompt else "ok\nRESULT: PASS"
+        return httpx.Response(200, json={"choices": [{"message": {"content": text}}], "usage": {"prompt_tokens": 10, "completion_tokens": 10}})
+    return chat
+
+
+def test_model_written_game_flows_into_builds_and_windows_package(signed_in, http, settings):
+    _connect(signed_in, http, "groq", "api.groq.com/openai/v1/models", {"data": [{"id": "llama"}]})
+    http.add("POST", "chat/completions", _game_writer(VALID_GAME))
+    signed_in.post("/projects", json={"topic": "타이핑"}, headers=CSRF)
+    line_id = _lines(signed_in)[0]["id"]
+    assert signed_in.post(f"/lines/{line_id}/run", headers=CSRF).json()["status"] == "awaiting_ceo"
+    assert any(l["type"] == "GAME UPDATE" for l in signed_in.get("/logs").json())
+    for build in signed_in.get(f"/lines/{line_id}").json()["builds"]:
+        assert "GENERATED-BY-MODEL" in signed_in.get(f"/builds/{build['id']}/play").text
+    ws = LineWorkspace(workspace_root(settings.workspace_dir, signed_in.get("/auth/me").json()["id"], line_id))
+    assert "GENERATED-BY-MODEL" in ws.read("release/windows/index.html")
+    assert ws.read("release/windows/Play.cmd").startswith("@echo off")
+
+
+def test_invalid_model_game_is_rejected_and_last_good_game_kept(signed_in, http):
+    _connect(signed_in, http, "groq", "api.groq.com/openai/v1/models", {"data": [{"id": "llama"}]})
+    http.add("POST", "chat/completions", _game_writer("```html\n<!doctype html><body>no marker, no entry point</body>\n```"))
+    signed_in.post("/projects", json={"topic": "좀비"}, headers=CSRF)
+    line_id = _lines(signed_in)[0]["id"]
+    signed_in.post(f"/lines/{line_id}/run", headers=CSRF)
+    assert any(l["type"] == "GAME REJECTED" for l in signed_in.get("/logs").json())
+    builds = signed_in.get(f"/lines/{line_id}").json()["builds"]
+    assert builds and all(b["smoke"]["passed"] for b in builds)

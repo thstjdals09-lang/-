@@ -20,13 +20,24 @@ from .. import catalog, routing, vault
 from ..connections import next_reset
 from ..providers import AdapterUnavailable, build_adapter
 from . import games
-from .executor import SIM_ID, SIM_NAME, AllProvidersFailed, TaskContext, build_prompt, qa_verdict, run_with_failover, simulate, to_file_content
+from .executor import SIM_ID, SIM_NAME, AllProvidersFailed, TaskContext, build_prompt, extract_game, qa_verdict, run_with_failover, simulate, to_file_content
 from .ideation import generate_ideas, slugify
 from .workspace import LineWorkspace
 
 FALLBACK_KIND = {"vision": "qa", "image": "design", "audio": "design"}
+GAME_PATH = "game/index.html"  # the canonical, always-playable game on main
 COOLDOWN = {"rate_limited": 45, "transient": 10, "unknown": 5}
 DEFAULT_USER_SETTINGS = {"policy": "cheapest_viable_quality", "max_parallel": 3, "auto_shortlist": 3, "workers_per_line": 3}
+
+
+def windows_package(html: str, title: str) -> dict[str, str]:
+    """Windows release folder: the offline game plus a double-click launcher (default browser).
+    A native wrapper (Tauri/Electron) is a later packaging step."""
+    return {
+        "release/windows/index.html": html,
+        "release/windows/Play.cmd": '@echo off\r\nstart "" "%~dp0index.html"\r\n',
+        "release/windows/README.txt": f"{title}\r\n\r\nDouble-click Play.cmd to start. Runs offline; no install needed.\r\n",
+    }
 
 
 def workspace_root(base: Path, user_id: str, line_id: str) -> Path:
@@ -292,8 +303,26 @@ class Factory:
             (retest_id, task["id"], fix_id, retest_id),
         )
 
+    def _template_game(self, line) -> str:
+        return games.render(self.catalog_dir, title=line["title"], topic=line["project_slug"], game_type=line["game_type"], family=line["family"])
+
+    def current_game(self, ws: LineWorkspace, line) -> str:
+        """The canonical game on main; falls back to the family template until one exists."""
+        html = ws.read(GAME_PATH)
+        return html if html and games.smoke_test(html)["passed"] else self._template_game(line)
+
+    def _is_game_task(self, stage_def, task) -> bool:
+        if task["task_key"].startswith("ceo-") or (task["repair_of"] and task["kind"] == "debugging"):
+            return True
+        return any(t["id"] == task["task_key"] and t.get("game") for t in stage_def["tasks"])
+
     def _run_task(self, conn, user_id, line, stage_def, stage_row, task, policy):
         ctx = self._context(conn, line, stage_def, task)
+        ws = self.workspace(user_id, line["id"])
+        ws.ensure(line["title"])
+        game_task = self._is_game_task(stage_def, task)
+        if game_task:
+            ctx.game_source = self.current_game(ws, line)
         conn.execute("UPDATE tasks SET status='in_progress', attempts=attempts+1, started_at=? WHERE id=?", (_iso(), task["id"]))
         try:
             text, connection_id, worker = self.execute(conn, user_id, line["id"], dict(task), ctx, policy)
@@ -303,10 +332,23 @@ class Factory:
             return
         path, body = to_file_content(task["artifact"] or "notes.md", text)
         files = {path: body}
+        if game_task:
+            generated = extract_game(text) if connection_id != SIM_ID else None
+            if generated and games.smoke_test(generated)["passed"]:
+                files[GAME_PATH] = generated
+                self.log(conn, user_id, "GAME UPDATE", f"{line['title']} · {worker}가 게임 코드 갱신 ({len(generated):,} bytes)", line["id"])
+            else:
+                if generated:
+                    self.log(conn, user_id, "GAME REJECTED", f"{line['title']} · {worker} 결과가 정적 검증 실패 → 이전 게임 유지", line["id"])
+                if ws.read(GAME_PATH) is None:
+                    files[GAME_PATH] = ctx.game_source  # seed main with a playable game
         if task["artifact"] == "release/index.html":
-            # P4 will replace this with model-written game code; the template keeps main playable.
-            files[path] = games.render(self.catalog_dir, title=line["title"], topic=line["project_slug"], game_type=line["game_type"], family=line["family"])
+            files[path] = self.current_game(ws, line)
             files["release/NOTES.md"] = text
+        if task["artifact"] == "release/windows.zip":
+            files.pop(path, None)
+            path = "release/windows/Play.cmd"
+            files.update(windows_package(self.current_game(ws, line), line["title"]))
         reviewer, reviewer_conn = None, None
         if task["kind"] == "coding":
             review_ctx = TaskContext(**{**ctx.__dict__, "task_name": f"diff 리뷰: {task['name']}", "role": "Technical Director", "kind": "qa",
@@ -314,8 +356,6 @@ class Factory:
             review_task = {**dict(task), "kind": "debugging", "difficulty": 2, "critical": 0}
             _, reviewer_conn, reviewer = self.execute(conn, user_id, line["id"], review_task, review_ctx, policy)
             self.message(conn, line["id"], "review_request", worker, reviewer, "diff 검토", task["id"])
-        ws = self.workspace(user_id, line["id"])
-        ws.ensure(line["title"])
         branch = ws.branch_name(line["project_slug"], line["slug"], worker, stage_def["id"], task["task_key"])
         commit = ws.commit_task(branch=branch, files=files, message=f"{stage_def['id']}: {task['name']}", author=worker)
         verdict = qa_verdict(text) if task["kind"] in ("qa", "vision") and not task["repair_of"] else ("passed" if task["kind"] in ("qa", "vision") else ("tests_passed" if task["kind"] == "coding" else None))
@@ -336,10 +376,10 @@ class Factory:
         conn.execute("UPDATE stages SET status='completed', qa_status='passed', completed_at=? WHERE id=?", (_iso(), stage_row["id"]))
         self.log(conn, user_id, "STAGE COMPLETE", f"{line['title']} · {stage_def['name']} 통과", line["id"])
         if stage_def.get("build"):
-            html = games.render(self.catalog_dir, title=line["title"], topic=line["project_slug"], game_type=line["game_type"], family=line["family"])
-            smoke = games.smoke_test(html)
             ws = self.workspace(user_id, line["id"])
             ws.ensure(line["title"])
+            html = self.current_game(ws, line)
+            smoke = games.smoke_test(html)
             sha = ws.commit_on_main({f"builds/v{stage_def['build']}/index.html": html}, f"build: v{stage_def['build']} ({stage_def['id']})", "Build Engineer")
             build_id = _id("bld")
             conn.execute("INSERT INTO builds(id, line_id, version, stage_key, platform, status, smoke, commit_sha) VALUES (?,?,?,?,?,?,?,?)",
