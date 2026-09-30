@@ -68,6 +68,15 @@ http://127.0.0.1:8000/console/. Then open **AI 마켓 → + AI 추가**: each pr
 page, you paste the key, and the server stores it in the vault and verifies it (model list, quota).
 OpenRouter supports **로그인으로 연결**: approve on openrouter.ai and the key is issued straight into the vault.
 
+## Make the link live (public server from this PC)
+
+Double-click **`start-public.cmd`**. It opens a Cloudflare quick tunnel, runs the server in public mode
+(email/password accounts, local email login off, secure cookies) and pushes the tunnel address to
+`docs/backend.json`, so https://thstjdals09-lang.github.io/-/ forwards visitors to the running server.
+The link works while that window stays open and the PC is on; the tunnel address changes on each start.
+Owner accounts listed in `AI_FACTORY_ADMIN_EMAILS` (backend/.env) may connect this PC's local AIs (Ollama);
+everyone else connects cloud AIs with their own keys.
+
 ## Run the backend locally
 
 ```bash
