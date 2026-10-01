@@ -22,7 +22,8 @@ from ..connections import next_reset
 from ..providers import NON_CHAT, AdapterUnavailable, build_adapter, choose_model
 from . import ai_ideation, games, runtime_qa
 from . import research as market
-from .executor import SIM_ID, SIM_NAME, AllProvidersFailed, TaskContext, build_prompt, extract_game, qa_verdict, run_with_failover, simulate, to_file_content
+from .executor import (SIM_ID, SIM_NAME, AllProvidersFailed, TaskContext, build_prompt, code_review_prompt, extract_game, plan_prompt, qa_verdict,
+                       run_with_failover, simulate, to_file_content)
 from .ideation import generate_ideas, slugify
 from .github_sync import GitHubSync, GitHubSyncError, RepoRef, repo_name
 from .pages_verifier import PagesVerifier
@@ -337,6 +338,13 @@ class Factory:
                     self._switch_model(conn, user_id, a.connection_id, line_id)
                 elif a.error_kind == "auth_error":
                     conn.execute("UPDATE provider_connections SET status='auth_required', last_error='auth_error' WHERE id=?", (a.connection_id,))
+                elif a.error_kind == "no_credit":
+                    # taken off the roster until the owner tops up and re-verifies; retrying only wastes time
+                    was_online = conn.execute("SELECT status FROM provider_connections WHERE id=?", (a.connection_id,)).fetchone()
+                    conn.execute("UPDATE provider_connections SET status='offline', last_error=? WHERE id=?",
+                                 ("결제 잔액(크레딧)이 없어 호출이 거절됨 · 충전 후 '재검증'을 누르면 다시 투입됩니다", a.connection_id))
+                    if was_online and was_online["status"] == "online":
+                        self.log(conn, user_id, "NO CREDIT", f"{a.name} · 결제 잔액이 없어 배정에서 제외 (충전 후 AI 사원 화면에서 재검증)", line_id)
                 elif a.error_kind == "quota_exhausted":
                     conn.execute("UPDATE provider_connections SET quota_used=COALESCE(quota_limit, quota_used) WHERE id=?", (a.connection_id,))
                 elif a.error_kind in COOLDOWN:
@@ -397,8 +405,9 @@ class Factory:
                     fixed += 1
         return {"tasks_requeued": tasks, "models_fixed": fixed}
 
-    def execute(self, conn, user_id, line_id, task: dict, ctx: TaskContext, policy: str) -> tuple[str, str, str]:
-        """Returns (text, connection_id, worker_name). Raises AllProvidersFailed when stuck."""
+    def execute(self, conn, user_id, line_id, task: dict, ctx: TaskContext, policy: str, *, request=None, avoid_ids=frozenset()) -> tuple[str, str, str]:
+        """Returns (text, connection_id, worker_name). Raises AllProvidersFailed when stuck.
+        `request` replaces the default task prompt; `avoid_ids` are AIs to try last (e.g. the author, for a review)."""
         team = self.employees(conn, user_id)
         # Game code and gate decisions need the strongest models: raise the bar so weak AIs only get them as a last resort.
         quality = bool(ctx.game_task or ctx.judge)
@@ -416,10 +425,10 @@ class Factory:
                 rtask.kind = sub
                 decision = routing.route(rtask, [e for e, _, _ in team], policy=policy)
         by_id = {e.id: (row, entry) for e, row, entry in team}
-        avoid = set()
+        avoid = set(avoid_ids)
         if task["task_key"].startswith("rewrite"):
             # a rewrite goes to a different AI than the ones whose game kept failing
-            avoid = {r["connection_id"] for r in conn.execute("SELECT connection_id FROM tasks WHERE stage_id=? AND connection_id IS NOT NULL", (task["stage_id"],))}
+            avoid |= {r["connection_id"] for r in conn.execute("SELECT connection_id FROM tasks WHERE stage_id=? AND connection_id IS NOT NULL", (task["stage_id"],))}
         candidates = []
         for c in self._order(conn, user_id, decision, quality=quality, avoid=avoid):
             row, entry = by_id[c.employee.id]
@@ -427,7 +436,7 @@ class Factory:
                 candidates.append((c.employee.id, c.employee.name, self._adapter(conn, user_id, row, entry)))
             except (AdapterUnavailable, vault.VaultError, ValueError):
                 continue
-        request = build_prompt(ctx)
+        request = request or build_prompt(ctx)
         if candidates:
             first = candidates[0][0]
             self._busy(first, +1)
@@ -593,11 +602,18 @@ class Factory:
                     ctx.images = [shot["screenshot"]]
                 ctx.dossier["qa/runtime-now.json"] = json.dumps({"status": shot["status"], "checks": shot["checks"], "errors": shot["errors"]}, ensure_ascii=False)
             conn.execute("UPDATE tasks SET status='in_progress', attempts=attempts+1, started_at=? WHERE id=?", (_iso(), task["id"]))
+            plan = None
+            if game_task and ctx.game_source is None and self._has_real_ai(conn, user_id):
+                plan = self._plan(conn, user_id, line, task, ctx, policy)
             try:
                 text, connection_id, worker = self.execute(conn, user_id, line["id"], dict(task), ctx, policy)
             except AllProvidersFailed:
                 return {"blocked": True}
             reviewer, reviewer_conn = None, None
+            if game_task and connection_id != SIM_ID:
+                text, review_text, reviewer_conn, reviewer = self._review_and_revise(conn, user_id, line, task, ctx, policy, text, connection_id, worker)
+                return {"blocked": False, "ctx": ctx, "game_task": game_task, "text": text, "connection_id": connection_id, "worker": worker,
+                        "reviewer": reviewer, "reviewer_conn": reviewer_conn, "review_text": review_text, "plan": plan}
             if task["kind"] == "coding":
                 path, body = to_file_content(task["artifact"] or "notes.md", text)
                 review_ctx = TaskContext(**{**ctx.__dict__, "task_name": f"코드 리뷰: {task['name']}", "role": "Technical Director", "kind": "qa",
@@ -609,6 +625,66 @@ class Factory:
                     "worker": worker, "reviewer": reviewer, "reviewer_conn": reviewer_conn, "review_text": review_text if task["kind"] == "coding" else None}
         finally:
             conn.close()
+
+    def _plan(self, conn, user_id, line, task, ctx: TaskContext, policy) -> str | None:
+        """Decoupling: a Technical Director AI splits the work into small checkable units before the
+        programmer writes anything. The plan becomes part of the coding prompt and the review."""
+        plan_task = {**dict(task), "kind": "planning", "difficulty": 3, "critical": 1}
+        plan_ctx = TaskContext(**{**ctx.__dict__, "role": "Technical Director", "kind": "planning", "game_task": False, "judge": False, "images": []})
+        try:
+            text, cid, name = self.execute(conn, user_id, line["id"], plan_task, plan_ctx, policy, request=plan_prompt(ctx))
+        except AllProvidersFailed:
+            return None
+        if cid == SIM_ID or len(text.strip()) < 200:
+            return None
+        ctx.plan = text.strip()
+        self.log(conn, user_id, "PLAN", f"{line['title']} · {name}가 {task['name']} 구현 계획 작성 (상태·함수·화면·규칙·검수 항목으로 분해)", line["id"])
+        return ctx.plan
+
+    def _review_and_revise(self, conn, user_id, line, task, ctx: TaskContext, policy, text, author_id, author):
+        """Dual check of a game/program answer: a syntax check that needs no AI, then a review of the
+        real file by another AI. Findings go back to the author once, inside the same task.
+        Returns (text, review_text | None, reviewer_connection_id, reviewer_name)."""
+        html = extract_game(text)
+        if html:
+            html = games.normalize(html)
+        static = games.static_issues(html)
+        review_text, reviewer_conn, reviewer = None, None, None
+        review_task = {**dict(task), "kind": "debugging", "difficulty": 3, "critical": 0}
+        review_ctx = TaskContext(**{**ctx.__dict__, "role": "Technical Director", "kind": "qa", "game_task": False, "judge": False, "images": []})
+        if html:
+            try:
+                review_text, reviewer_conn, reviewer = self.execute(conn, user_id, line["id"], review_task, review_ctx, policy,
+                                                                    request=code_review_prompt(ctx, html, static), avoid_ids={author_id})
+            except AllProvidersFailed:
+                review_text = None
+            if reviewer_conn == SIM_ID:
+                review_text, reviewer_conn, reviewer = None, None, None
+        rejected = review_text is not None and qa_verdict(review_text) == "failed"
+        if static:
+            self.log(conn, user_id, "STATIC CHECK", f"{line['title']} · {author} 코드 문법 검사 불합격: {static[0][:140]}", line["id"])
+        if not static and not rejected:
+            return text, review_text, reviewer_conn, reviewer
+        notes = "\n".join(f"- {s}" for s in static)
+        if rejected:
+            notes += f"\n\nReviewer ({reviewer}):\n{review_text[-2500:]}"
+        fix_ctx = TaskContext(**{**ctx.__dict__, "previous_answer": html, "revision_notes": notes.strip()})
+        try:
+            text2, cid2, _ = self.execute(conn, user_id, line["id"], dict(task), fix_ctx, policy)
+        except AllProvidersFailed:
+            text2, cid2 = None, None
+        html2 = extract_game(text2) if text2 and cid2 != SIM_ID else None
+        static2 = games.static_issues(games.normalize(html2)) if html2 else None
+        if static2 is not None and len(static2) <= len(static):
+            self.log(conn, user_id, "REVISION", f"{line['title']} · {task['name']} 지적 {len(static) + int(rejected)}건을 작업 안에서 바로 수정"
+                     + (" (문법 검사 통과)" if not static2 else f" (문법 문제 {len(static2)}건 남음)"), line["id"])
+            text, static = text2, static2
+            verdict = "RESULT: FAIL" if static else "RESULT: PASS"
+            review_text = ((review_text or "") + "\n\n## 작업 내 수정\n지적 사항을 작성자에게 돌려보내 다시 받음. 남은 문법 문제: "
+                           + ("; ".join(static) if static else "없음") + f"\n{verdict}")
+        elif static:
+            review_text = (review_text or "") + "\n\n## 문법 검사\n" + "\n".join(f"- {s}" for s in static) + "\nRESULT: FAIL"
+        return text, review_text, reviewer_conn, reviewer
 
     def _finalize_task(self, conn, user_id, line, stage_def, stage_row, task, res):
         """Leader-thread part: files → worktree commit → merge → task/artifact rows (serialized)."""
@@ -644,6 +720,8 @@ class Factory:
                 if current is None:
                     files[GAME_PATH] = games.mark_fallback(self._template_game(line))  # keeps main playable; not an AI base
                     self.log(conn, user_id, "TEMPLATE FALLBACK", f"{line['title']} · AI가 만든 게임이 아직 없어 비상용 템플릿으로 main을 채움 (다음 게임 작업은 다시 백지에서 시작)", line["id"])
+        if res.get("plan"):
+            files[f"plans/{stage_def['id']}-{task['task_key']}.md"] = res["plan"] + "\n"
         if task["artifact"] == "release/index.html":
             files[path] = self.current_game(ws, line)
             files["release/NOTES.md"] = text
@@ -686,6 +764,7 @@ class Factory:
             self.log(conn, user_id, label, f"{line['title']} · {task['name']} 불합격 → 지적사항으로 수정 작업 생성", line["id"])
             self._spawn_repair(conn, stage_row, task)
         elif review_failed:
+            reviewer = reviewer or "문법 검사"  # the syntax check can reject an answer without any reviewer AI
             self.log(conn, user_id, "REVIEW REJECT", f"{line['title']} · {reviewer}가 {task['name']} 변경 요청 → 리뷰 반영 수정 작업 생성", line["id"])
             self.message(conn, line["id"], "review_request", reviewer, worker, "변경 요청: " + res["review_text"][-200:], task["id"])
             self._spawn_repair(conn, stage_row, task)
@@ -758,7 +837,7 @@ class Factory:
                 ws.commit_on_main({GAME_PATH: r["content"]}, f"revert: restore AI game v{r['version']} after failed runtime QA", "AI Factory Leader")
                 self.log(conn, user_id, "RUNTIME ROLLBACK", f"{line['title']} · 수정 실패 → 마지막으로 통과한 AI 게임 v{r['version']}로 되돌림", line["id"])
                 return r["content"]
-        done = conn.execute("SELECT COUNT(*) FROM tasks WHERE stage_id=? AND task_key LIKE 'rewrite%'", (stage_row["id"],)).fetchone()[0]
+        done = conn.execute("SELECT COUNT(*) FROM tasks WHERE stage_id=? AND task_key LIKE 'rewrite%' AND repair_of IS NULL", (stage_row["id"],)).fetchone()[0]
         if done < MAX_REWRITES and self._has_real_ai(conn, user_id):
             report = json.dumps({"checks": runtime["checks"], "errors": runtime["errors"]}, ensure_ascii=False, indent=2)
             conn.execute("INSERT INTO artifacts(line_id, stage_key, path, content) VALUES (?,?,?,?)", (line["id"], stage_def["id"], f"qa/runtime-{stage_def['id']}-rewrite{done + 1}.json", report))

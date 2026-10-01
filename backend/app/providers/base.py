@@ -64,7 +64,7 @@ class HealthResult:
 
 @dataclass
 class ErrorInfo:
-    kind: str  # rate_limited | auth_error | context_exceeded | transient | quota_exhausted | bad_request | unknown
+    kind: str  # rate_limited | auth_error | context_exceeded | transient | quota_exhausted | no_credit | bad_request | unknown
     retryable: bool
     cooldown_seconds: float = 0
 
@@ -80,11 +80,17 @@ MODEL_GONE_HINTS = ("no longer available", "decommissioned", "deprecated", "does
                     "not found for api version", "terms acceptance", "model_terms_required", "unknown model", "invalid model")
 
 
+NO_CREDIT_HINTS = ("credit balance is too low", "insufficient credit", "insufficient balance", "insufficient_quota", "insufficient funds",
+                   "purchase credits", "billing hard limit", "payment required", "exceeded your current quota")
+
+
 def classify_error(status: int | None, body: str = "") -> ErrorInfo:
     """Shared classifier. Mirrors classifyError in docs/js/router.js and adds body hints."""
     text = (body or "").lower()
     if status in (400, 403, 404) and "model" in text and any(h in text for h in MODEL_GONE_HINTS):
         return ErrorInfo("model_unavailable", True)
+    if status == 402 or (status in (400, 403, 429) and any(h in text for h in NO_CREDIT_HINTS)):
+        return ErrorInfo("no_credit", False)  # a paid account without balance: every call would fail the same way
     if status == 429:
         if "quota" in text and ("day" in text or "exceeded" in text):
             return ErrorInfo("quota_exhausted", True, 3600)

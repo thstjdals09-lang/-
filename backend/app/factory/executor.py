@@ -37,6 +37,9 @@ class TaskContext:
     dossier: dict[str, str] = field(default_factory=dict)  # artifacts from earlier stages
     images: list[bytes] = field(default_factory=list)
     research: str = ""  # market brief from web search (ideation room)
+    plan: str = ""  # implementation plan written before the code (decoupling)
+    revision_notes: str = ""  # static-check and reviewer findings the author must fix now
+    previous_answer: str | None = None  # the file those findings are about
 
 
 GAME_RULES = (
@@ -115,10 +118,18 @@ def build_prompt(ctx: TaskContext) -> ExecuteRequest:
         f"# Inputs from completed dependencies\n{deps}\n\n# CEO feedback to honour\n{feedback}\n"
     )
     max_tokens = 3000 if ctx.kind in ("coding", "debugging") else 1600
+    if ctx.game_task and ctx.plan:
+        prompt += ("\n# Implementation plan (written by the Technical Director — implement every item; "
+                   f"do not add systems that are not in it)\n{ctx.plan[:6000]}\n")
+    if ctx.game_task and ctx.revision_notes:
+        prompt += ("\n# Findings to fix NOW (syntax check and code review of your previous answer)\n"
+                   f"{ctx.revision_notes[:4000]}\nFix every finding. If the file was cut off, make it shorter but complete.\n")
     if ctx.game_task:
         prompt += (f"\n# {'Program' if app else 'Game'} deliverable\nWrite short notes for `{ctx.artifact}` first, then the complete "
                    f"{noun} file.\n{APP_RULES if app else GAME_RULES}\n")
-        if ctx.game_source:
+        if ctx.revision_notes and ctx.previous_answer:
+            prompt += f"\n# Your previous answer (correct it and return the whole file)\n```html\n{ctx.previous_answer[:60000]}\n```\n"
+        elif ctx.game_source:
             prompt += f"\n# Current {noun} source (improve it; keep what works)\n```html\n{ctx.game_source[:60000]}\n```\n"
         elif app:
             prompt += ("\nNo program exists yet. Write it from scratch so it implements THIS concept and the design dossier: its own "
@@ -129,6 +140,53 @@ def build_prompt(ctx: TaskContext) -> ExecuteRequest:
                        "collect-and-dodge, pick-a-card or click-to-earn template.\n")
         max_tokens = 12000
     return ExecuteRequest(prompt=prompt, system=system, max_tokens=max_tokens, images=list(ctx.images))
+
+
+def _brief(ctx: TaskContext) -> str:
+    app = is_app(ctx)
+    c = ctx.concept or {}
+    return (f"# {'Program' if app else 'Game'}\n{ctx.line_title} ({ctx.game_type})\nPitch: {ctx.pitch}\n"
+            f"{'Main user flow' if app else 'Core loop'}: {' → '.join(ctx.loop)}\n"
+            + (f"{'Features' if app else 'Mechanics'}: {'; '.join(c.get('mechanics') or [])}\n" if c.get("mechanics") else "")
+            + (f"First scope: {c['scope']}\n" if c.get("scope") else ""))
+
+
+def plan_prompt(ctx: TaskContext) -> ExecuteRequest:
+    """Decoupling step: the work is split into small, checkable units before anyone writes code."""
+    noun = "program" if is_app(ctx) else "game"
+    system = (f"You are the Technical Director. Before the programmer writes the {noun}, you split the work into small units "
+              "so nothing is invented or forgotten. Plan only what the concept and the dossier ask for. No code. Korean prose, English identifiers.")
+    dossier = "\n\n".join(f"### {name}\n{body[:1800]}" for name, body in list(ctx.dossier.items())[:5])
+    prompt = (
+        f"{_brief(ctx)}\n# Design dossier (excerpts)\n{dossier or '(none yet)'}\n\n# Task being planned\n{ctx.stage_name}: {ctx.task_name}\n\n"
+        f"Write the implementation plan for ONE self-contained HTML file (inline CSS and JavaScript, no libraries, about 250-450 lines "
+        f"so it fits in a single answer). Sections, each short:\n"
+        "1. State — every variable with its type and initial value.\n"
+        "2. Functions — name, inputs, what it changes; include startGame() and the main update/render or event handlers.\n"
+        "3. Screens/UI — elements with their ids and what each shows.\n"
+        "4. Input — each key/pointer/form action and the function it calls.\n"
+        f"5. Rules — the exact numbers ({'limits, formulas, defaults' if is_app(ctx) else 'speeds, timers, scoring, win and lose conditions'}).\n"
+        "6. Acceptance checks — 6-10 numbered, observable statements a reviewer can verify by reading the code.\n"
+        "Leave out anything that does not fit in the size budget and say what was left out."
+    )
+    return ExecuteRequest(prompt=prompt, system=system, max_tokens=2200, temperature=0.3)
+
+
+def code_review_prompt(ctx: TaskContext, html: str, static: list[str]) -> ExecuteRequest:
+    """Review of the actual file against the plan, by a different AI than the author."""
+    noun = "program" if is_app(ctx) else "game"
+    system = (f"You are the Technical Director reviewing a {noun} another AI wrote. Read the code itself; do not trust its comments. "
+              "Report only real defects you can point to in the code. Korean prose.")
+    prompt = (
+        f"{_brief(ctx)}\n# Implementation plan it had to follow\n{ctx.plan[:5000] or '(no plan: judge against the concept above)'}\n\n"
+        f"# Syntax check\n{chr(10).join('- ' + s for s in static) or 'passed'}\n\n# The file\n```html\n{html[:60000]}\n```\n\n"
+        "Check, in this order: (1) does it start and stay usable — startGame() exists and reaches a working state; (2) every acceptance "
+        "check / mechanic above is really implemented, not stubbed; (3) bugs: undefined variables or functions, NaN from missing "
+        "values, handlers bound to missing ids, loops that never end, state not reset on restart; (4) anything from a generic "
+        "template that is not this concept. List blocking issues as numbered items naming the function or line. "
+        "End with a final line exactly `RESULT: PASS` or `RESULT: FAIL`."
+    )
+    return ExecuteRequest(prompt=prompt, system=system, max_tokens=1800, temperature=0.2)
 
 
 _HTML_BLOCK = re.compile(r"```html\s*\n(.*?)```", re.S | re.I)

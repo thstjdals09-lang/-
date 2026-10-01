@@ -70,7 +70,7 @@ def test_failed_runtime_gate_repairs_rewrites_then_pauses_without_template(runti
     assert {"runtime-fix1", "runtime-fix2", "rewrite1", "rewrite2"} <= set(keys)
     # the emergency template is never shipped as the AI's build
     assert detail["status"] == "paused" and detail["builds"] == []
-    rewrite = next(p for p in prompts if "게임 처음부터 다시 작성" in p)
+    rewrite = next(p for p in prompts if "게임 처음부터 다시 작성" in p and "# Game deliverable" in p)
     assert "No game exists yet" in rewrite and "# Current game source" not in rewrite
     # resuming grants another rewrite
     assert signed_in.post(f"/lines/{line_id}/resume", headers=CSRF).json()["status"] == "running"

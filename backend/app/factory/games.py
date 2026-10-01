@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 from .ideation import game_family
@@ -33,6 +37,47 @@ def smoke_test(html: str) -> dict:
         ("tokens_resolved", "{{" not in html),
     ]
     return {"passed": all(ok for _, ok in checks), "checks": [{"id": cid, "ok": ok} for cid, ok in checks]}
+
+
+_INLINE_SCRIPT = re.compile(r"<script(?![^>]*\bsrc=)([^>]*)>(.*?)</script>", re.S | re.I)
+
+
+def static_issues(html: str | None) -> list[str]:
+    """Defects that can be proven without running the file: a cut-off document, missing factory
+    requirements and JavaScript that does not parse (node --check, skipped when Node is absent)."""
+    if not html:
+        return ["no complete HTML file in the answer (it must be one ```html block starting with <!doctype html>)"]
+    issues = [f"smoke check failed: {c['id']}" for c in smoke_test(html)["checks"] if not c["ok"]]
+    if not re.search(r"</html>\s*$", html, re.I):
+        issues.append("the file is cut off: it does not end with </html> (write a shorter, complete file)")
+    if len(re.findall(r"<script\b", html, re.I)) != len(re.findall(r"</script>", html, re.I)):
+        issues.append("a <script> element is never closed")
+    node = shutil.which("node")
+    if node:
+        for attrs, body in _INLINE_SCRIPT.findall(html):
+            if not body.strip() or re.search(r"type\s*=\s*[\"']?(application/(ld\+)?json|text/template)", attrs, re.I):
+                continue
+            suffix = ".mjs" if re.search(r"type\s*=\s*[\"']?module", attrs, re.I) else ".cjs"
+            fd, name = tempfile.mkstemp(suffix=suffix, prefix="aif-syntax-")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(body)
+                res = subprocess.run([node, "--check", name], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20)
+                if res.returncode != 0:
+                    lines = [l for l in res.stderr.splitlines() if l.strip()]
+                    where = next((l for l in lines if re.match(r".*:\d+$", l.strip())), "")
+                    line_no = where.rsplit(":", 1)[-1] if where else "?"
+                    error = next((l.strip() for l in lines if "Error" in l), "syntax error")
+                    snippet = next((l.strip()[:120] for l in lines[1:2]), "")
+                    issues.append(f"JavaScript does not parse: {error} (script line {line_no}: {snippet})")
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+            finally:
+                try:
+                    os.unlink(name)
+                except OSError:
+                    pass
+    return issues
 
 
 FALLBACK_MARKER = "<!-- ai-factory:template-fallback -->"

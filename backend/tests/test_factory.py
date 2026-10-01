@@ -272,7 +272,7 @@ def test_fallback_template_is_never_the_base_for_ai_game_work(signed_in, http):
     http.add("POST", "chat/completions", chat)
     signed_in.post("/projects", json={"topic": "좀비"}, headers=CSRF)
     signed_in.post(f"/lines/{_lines(signed_in)[0]['id']}/run", headers=CSRF)
-    game_prompts = [p for p in prompts if "# Game deliverable" in p]
+    game_prompts = [p for p in prompts if "# Game deliverable" in p and "Findings to fix NOW" not in p]
     assert len(game_prompts) >= 2
     assert all("No game exists yet" in p and "# Current game source" not in p for p in game_prompts)
     assert any(l["type"] == "TEMPLATE FALLBACK" for l in signed_in.get("/logs").json())
@@ -396,3 +396,58 @@ def test_program_prompts_ask_for_a_tool():
     game = build_prompt(TaskContext(**{**ctx.__dict__, "family": "action"}))
     assert "game studio" in game.system and "# Game deliverable" in game.prompt and "win/lose state" in game.prompt
     assert '"family": "app"' in concept_prompt("가계부", "자동선택", "Web", "", 5, kind="app").prompt
+
+
+def test_static_check_finds_cut_off_and_unparsable_code():
+    from app.factory import games
+
+    good = '<!doctype html><html><body data-ai-factory-game="v2"><script>function startGame(){ let a = 1; }</script></body></html>'
+    assert games.static_issues(good) == []
+    assert any("cut off" in i for i in games.static_issues(good[:-25]))
+    assert games.static_issues(None)
+    import shutil
+    if shutil.which("node"):
+        assert any("does not parse" in i for i in games.static_issues(good.replace("let a = 1;", "let a = var(--x);")))
+
+
+def test_no_credit_takes_a_paid_ai_off_the_roster():
+    from app.providers.base import classify_error
+
+    info = classify_error(400, '{"error":{"message":"Your credit balance is too low to access the Anthropic API."}}')
+    assert info.kind == "no_credit" and not info.retryable
+    assert classify_error(402, "").kind == "no_credit"
+    assert classify_error(400, "bad json").kind == "bad_request"
+    assert classify_error(429, "Rate limit exceeded").kind == "rate_limited"
+
+
+def test_game_task_is_planned_then_reviewed_and_revised_in_place(signed_in, http):
+    _connect(signed_in, http, "groq", "api.groq.com/openai/v1/models", {"data": [{"id": "llama"}]})
+    broken = VALID_GAME.replace("</script>", "let broken = var(--x);</script>", 1)
+    seen = {"plan": 0, "review": 0, "revise": 0}
+
+    def chat(req):
+        body = json.loads(req.content)
+        prompt, system = body["messages"][-1]["content"], body["messages"][0]["content"]
+        if "split the work into small units" in system:
+            seen["plan"] += 1
+            text = "## 1. State\n" + "- score: number = 0\n" * 30 + "## 6. Acceptance checks\n1. startGame resets score"
+        elif "reviewing a" in system:
+            seen["review"] += 1
+            text = "1. 문법 오류\nRESULT: FAIL"
+        elif "Findings to fix NOW" in prompt:
+            seen["revise"] += 1
+            assert "# Your previous answer" in prompt and "does not parse" in prompt
+            text = "notes\n" + VALID_GAME
+        elif "# Game deliverable" in prompt:
+            assert "# Implementation plan" in prompt or "# Current game source" in prompt
+            text = "notes\n" + broken
+        else:
+            text = "ok\nRESULT: PASS"
+        return httpx.Response(200, json={"choices": [{"message": {"content": text}}]})
+
+    http.add("POST", "chat/completions", chat)
+    line_id, detail = _run_to_build(signed_in, "타이핑", count=1)
+    types = [l["type"] for l in signed_in.get("/logs").json()]
+    assert seen["plan"] >= 1 and seen["review"] >= 1 and seen["revise"] >= 1
+    assert "PLAN" in types and "STATIC CHECK" in types and "REVISION" in types
+    assert "GENERATED-BY-MODEL" in signed_in.get(f"/builds/{detail['builds'][0]['id']}/play").text
