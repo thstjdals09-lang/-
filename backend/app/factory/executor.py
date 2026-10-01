@@ -50,12 +50,38 @@ GAME_RULES = (
 )
 
 
+# Programs that are not games keep the same file contract (marker + startGame() as the reset entry point)
+# so the build, smoke test and runtime QA treat both alike.
+APP_RULES = (
+    "Return the COMPLETE updated program as ONE self-contained HTML file inside a single ```html code block, "
+    "after your notes. Hard requirements: starts with <!doctype html>; <body data-ai-factory-game=\"v2\">; "
+    "a global function startGame() that resets the program to its initial screen (the factory calls it to start a test run); "
+    "no external scripts, stylesheets, fonts, images or network requests (inline everything); runs offline inside a sandboxed "
+    "iframe, so wrap any localStorage use in try/catch and keep working in memory when storage is blocked; every feature in the "
+    "concept really works with real logic (no placeholder buttons, no fake data pretending to be results); sensible sample data "
+    "on first open so the screen is never empty; clear empty, error and success states; keyboard and pointer usable; Korean UI "
+    "text; responsive down to 360px wide. This is a tool, not a game: no score, lives, levels or win/lose screens unless the "
+    "concept asks for them. Even when fixing a bug, return the WHOLE corrected file — never a diff or a patch. Plain JavaScript "
+    "only: CSS values such as var(--x) belong in strings or style sheets, not bare in JS expressions."
+)
+
+
+def is_app(ctx: "TaskContext") -> bool:
+    return ctx.family == "app"
+
+
 def build_prompt(ctx: TaskContext) -> ExecuteRequest:
+    app = is_app(ctx)
+    noun = "program" if app else "game"
     system = (
-        f"You are the {ctx.role} in an autonomous game studio. You produce production artifacts, not chat. "
-        f"Write the complete content of `{ctx.artifact}` and nothing else. Be concrete and specific to this game. "
+        f"You are the {ctx.role} in an autonomous {'software' if app else 'game'} studio. You produce production artifacts, not chat. "
+        f"Write the complete content of `{ctx.artifact}` and nothing else. Be concrete and specific to this {noun}. "
         "Write prose in Korean; code, identifiers and file formats in English."
     )
+    if app:
+        system += (" The product is a program people use to get something done (an app, tool or utility), not a game: wherever the "
+                   "studio's stage, task or file names say game, gameplay, fun, balance, economy or art, apply them to this program "
+                   "(features, user flow, usefulness, defaults and limits, data model, visual design).")
     deps = "\n\n".join(f"### {name}\n{body[:4000]}" for name, body in ctx.dependencies.items()) or "(none)"
     feedback = "\n".join(f"- {f}" for f in ctx.feedback) or "(none)"
     qa_rule = ""
@@ -66,8 +92,9 @@ def build_prompt(ctx: TaskContext) -> ExecuteRequest:
     if ctx.concept:
         c = ctx.concept
         concept = ("# Concept (agreed in the ideation room — build this)\n"
-                   f"Mechanics: {'; '.join(c.get('mechanics') or [])}\nWhy it is fun: {c.get('why_fun', '')}\n"
-                   f"First playable scope: {c.get('scope', '')}\n"
+                   f"{'Features' if app else 'Mechanics'}: {'; '.join(c.get('mechanics') or [])}\n"
+                   f"{'Why people keep using it' if app else 'Why it is fun'}: {c.get('why_fun', '')}\n"
+                   f"First {'usable' if app else 'playable'} scope: {c.get('scope', '')}\n"
                    + (f"Market fit: {c['market_fit']}\n" if c.get("market_fit") else "")
                    + (f"Room consensus ({c.get('moderator', '')}): {c['consensus']}\n" if c.get("consensus") else "")
                    + (f"Author's revisions after critique: {'; '.join(c['revision'])}\n" if c.get("revision") else "")
@@ -80,8 +107,8 @@ def build_prompt(ctx: TaskContext) -> ExecuteRequest:
         dossier = "# Design dossier (decisions from earlier stages — follow them)\n" + "\n\n".join(
             f"### {name}\n{body}" for name, body in ctx.dossier.items()) + "\n\n"
     prompt = (
-        f"# Game\n{ctx.line_title} ({ctx.game_type}, family {ctx.family}, platform {ctx.platform})\n"
-        f"Pitch: {ctx.pitch}\nCore loop: {' → '.join(ctx.loop)}\n\n"
+        f"# {'Program' if app else 'Game'}\n{ctx.line_title} ({ctx.game_type}, family {ctx.family}, platform {ctx.platform})\n"
+        f"Pitch: {ctx.pitch}\n{'Main user flow' if app else 'Core loop'}: {' → '.join(ctx.loop)}\n\n"
         f"{concept}{research}{dossier}"
         f"# Stage\n{ctx.stage_name}: {ctx.stage_summary}\n\n"
         f"# Your task\n{ctx.task_name} → produce `{ctx.artifact}`{qa_rule}\n\n"
@@ -89,9 +116,13 @@ def build_prompt(ctx: TaskContext) -> ExecuteRequest:
     )
     max_tokens = 3000 if ctx.kind in ("coding", "debugging") else 1600
     if ctx.game_task:
-        prompt += f"\n# Game deliverable\nWrite short notes for `{ctx.artifact}` first, then the complete game file.\n{GAME_RULES}\n"
+        prompt += (f"\n# {'Program' if app else 'Game'} deliverable\nWrite short notes for `{ctx.artifact}` first, then the complete "
+                   f"{noun} file.\n{APP_RULES if app else GAME_RULES}\n")
         if ctx.game_source:
-            prompt += f"\n# Current game source (improve it; keep what works)\n```html\n{ctx.game_source[:60000]}\n```\n"
+            prompt += f"\n# Current {noun} source (improve it; keep what works)\n```html\n{ctx.game_source[:60000]}\n```\n"
+        elif app:
+            prompt += ("\nNo program exists yet. Write it from scratch so it implements THIS concept and the design dossier: its own "
+                       "features, data, screens and user flow. Do not hand back a generic to-do list, counter or form demo.\n")
         else:
             prompt += ("\nNo game exists yet. Write it from scratch so it implements THIS concept and the design dossier: "
                        "its own mechanics, rules, controls, visuals and win/lose conditions. Do not fall back to a generic "
@@ -115,7 +146,7 @@ def simulate(ctx: TaskContext) -> str:
     lines = [
         f"# {ctx.task_name}",
         "",
-        f"- Game: {ctx.line_title}",
+        f"- {'Program' if is_app(ctx) else 'Game'}: {ctx.line_title}",
         f"- Stage: {ctx.stage_name}",
         f"- Role: {ctx.role}",
         f"- Worker: {SIM_NAME} (no provider connected — connect one in the AI Marketplace for real output)",

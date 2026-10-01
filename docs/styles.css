@@ -266,6 +266,7 @@ label.reserve { grid-template-columns: auto 1fr; align-items: center; }
 .result { display: grid; gap: 10px; align-content: start; }
 .cover { display: grid; gap: 6px; align-content: end; min-height: 120px; padding: 14px; border-radius: 11px; background: radial-gradient(circle at 20% 0, #3b3290, #0d1020 70%); }
 .cover.action { background: radial-gradient(circle at 80% 0, #17557a, #081018 70%); }
+.cover.app { background: radial-gradient(circle at 50% 0, #4a3a7a, #0d0a18 70%); }
 .cover.management { background: radial-gradient(circle at 20% 0, #2d5a33, #0a130c 70%); }
 .cover span { font-size: 10px; letter-spacing: .14em; color: #d9d4ff; }
 .cover strong { font-size: 18px; }

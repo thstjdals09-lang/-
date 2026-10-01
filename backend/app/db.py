@@ -304,6 +304,10 @@ MIGRATIONS: list[str] = [
     ALTER TABLE projects ADD COLUMN status TEXT NOT NULL DEFAULT 'ready';
     ALTER TABLE projects ADD COLUMN research TEXT;
     """,
+    # 10 — a project is a game or any other program (app, tool, utility).
+    """
+    ALTER TABLE projects ADD COLUMN kind TEXT NOT NULL DEFAULT 'game';
+    """,
 ]
 
 

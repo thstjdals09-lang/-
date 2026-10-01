@@ -19,7 +19,7 @@ export function review(app) {
       '<ul class="checks">' + r.qa.checks.map((c) => '<li class="' + (c.ok ? "ok" : "bad") + '">' + (c.ok ? "✓" : "✕") + " smoke · " + esc(c.id) + "</li>").join("") +
       qaTasks.map((t) => '<li class="' + (t.qa === "failed" ? "bad" : "ok") + '">' + (t.qa === "failed" ? "✕" : "✓") + " " + esc(t.name) + "</li>").join("") + "</ul>" +
       '<p class="muted small">' + esc(fmtTime(r.createdAt)) + (r.note ? " · 수정요청: " + esc(r.note) : "") + "</p>" +
-      '<div class="actions wrap"><button class="btn primary" data-action="play" data-id="' + esc(r.lineId) + '">게임 테스트 실행</button><button class="btn" data-action="gdd" data-id="' + esc(r.lineId) + '">GDD</button><button class="btn" data-action="open-line" data-id="' + esc(r.lineId) + '">생산라인</button></div>' +
+      '<div class="actions wrap"><button class="btn primary" data-action="play" data-id="' + esc(r.lineId) + '">실행해서 테스트</button><button class="btn" data-action="gdd" data-id="' + esc(r.lineId) + '">GDD</button><button class="btn" data-action="open-line" data-id="' + esc(r.lineId) + '">생산라인</button></div>' +
       (r.status === "pending"
         ? '<form class="inlineForm" data-form="revision" data-id="' + esc(r.id) + '"><input name="text" maxlength="200" placeholder="수정이 필요하면 지시 입력"><button class="btn" type="submit">수정 요청</button><button class="btn primary" type="button" data-action="approve" data-id="' + esc(r.id) + '">승인</button></form>'
         : "") +
@@ -126,7 +126,7 @@ export function login(app) {
     '<div class="loginShell"><div class="loginCard">' +
     '<div class="brandMark big" aria-hidden="true">AF</div><div class="eyebrow">AI FACTORY · GAME STUDIO OS</div>' +
     "<h1>" + (mode === "register" ? "회원가입" : "로그인") + "</h1>" +
-    "<p>계정마다 자기 AI(키), 프로젝트, 생산라인, 게임 배포가 따로 관리됩니다.</p>" + flash +
+    "<p>계정마다 자기 AI(키), 프로젝트, 생산라인, 결과물 배포가 따로 관리됩니다.</p>" + flash +
     (online
       ? accountForm +
         (info.google ? '<button class="googleBtn" data-action="google-login"><span aria-hidden="true">G</span> Google 계정으로 로그인</button>' : "") +
@@ -145,7 +145,7 @@ export function account(app) {
   if (state.user.mode !== "backend") {
     return (
       '<section class="panel"><div class="eyebrow">GUEST</div><h2>게스트 모드 · 계정 없음</h2>' +
-      '<p class="muted">지금은 로그인하지 않은 프리뷰입니다. 데이터는 이 브라우저에만 저장되고, AI 키 연결·실제 게임 생성·GitHub 배포는 할 수 없습니다.</p>' +
+      '<p class="muted">지금은 로그인하지 않은 프리뷰입니다. 데이터는 이 브라우저에만 저장되고, AI 키 연결·실제 게임/프로그램 생성·GitHub 배포는 할 수 없습니다.</p>' +
       '<ol class="guide"><li>이 PC에서 <strong>start-backend.cmd</strong> 실행 → http://127.0.0.1:8000/console/ 에서 로그인</li><li>또는 운영 중인 AI Factory 서버 주소로 접속해 Google 계정으로 로그인</li></ol>' +
       '<div class="actions wrap"><button class="btn primary" data-action="logout">로그인 화면으로</button><button class="btn danger" data-action="reset-all">게스트 데이터 초기화</button></div></section>'
     );
@@ -163,15 +163,15 @@ export function account(app) {
     stat("가입", esc(fmtTime(parseServerTime(a.createdAt)))) + stat("최근 로그인", esc(fmtTime(parseServerTime(a.lastLoginAt)))) + "</dl></section>" +
     '<section class="panel"><div class="eyebrow">MY FACTORY</div><h2>내 사용 현황</h2><dl class="facts">' +
     stat("연결한 AI", c.ais + " (온라인 " + c.ais_online + ")") + stat("프로젝트", c.projects) + stat("생산라인", c.lines + " (가동 " + c.running + ")") +
-    stat("빌드", c.builds) + stat("배포된 게임", c.deployed) + "</dl>" +
-    '<p class="muted small">AI 키·프로젝트·게임은 이 계정에만 보입니다. 다른 사람은 자기 계정으로 로그인해 자기 AI를 연결합니다.</p></section>' +
+    stat("빌드", c.builds) + stat("배포된 결과물", c.deployed) + "</dl>" +
+    '<p class="muted small">AI 키·프로젝트·결과물은 이 계정에만 보입니다. 다른 사람은 자기 계정으로 로그인해 자기 AI를 연결합니다.</p></section>' +
     "</div>" +
-    '<section class="panel"><div class="panelHead"><div><div class="eyebrow">GITHUB · 게임 배포</div><h2>내 GitHub 연결</h2></div>' +
+    '<section class="panel"><div class="panelHead"><div><div class="eyebrow">GITHUB · 배포</div><h2>내 GitHub 연결</h2></div>' +
     (a.github.connected ? '<span class="pill good">@' + esc(a.github.login) + " 연결됨</span>" : '<span class="pill warn">미연결</span>') + "</div>" +
     (a.github.connected
-      ? '<p class="muted">완성된 게임은 <strong>@' + esc(a.github.login) + "</strong> 계정에 aif-… 저장소로 올라가고 GitHub Pages 링크가 만들어집니다.</p>" +
+      ? '<p class="muted">완성된 게임·프로그램은 <strong>@' + esc(a.github.login) + "</strong> 계정에 aif-… 저장소로 올라가고 GitHub Pages 링크가 만들어집니다.</p>" +
         '<div class="actions"><button class="btn danger" data-action="github-disconnect">GitHub 연결 해제</button></div>'
-      : '<p class="muted">연결하지 않으면 게임은 이 서버에만 저장되고 배포 링크가 만들어지지 않습니다. 게임은 내 GitHub 계정에만 올라갑니다.</p>' +
+      : '<p class="muted">연결하지 않으면 결과물은 이 서버에만 저장되고 배포 링크가 만들어지지 않습니다. 결과물은 내 GitHub 계정에만 올라갑니다.</p>' +
         '<ol class="guide"><li>GitHub 로그인 후 토큰 발급 페이지 열기 (repo 권한이 미리 선택됨)</li><li>"Generate token" → 토큰 복사</li><li>아래에 붙여넣고 연결 (서버가 GitHub에 확인 후 암호화 저장)</li></ol>' +
         '<div class="actions wrap"><a class="btn" href="' + esc(ghUrl) + '" target="_blank" rel="noopener">① GitHub 로그인 · 토큰 발급 ↗</a></div>' +
         '<form class="inlineForm" data-form="github-connect"><input name="token" type="password" autocomplete="off" placeholder="ghp_… 또는 github_pat_…"><button class="btn primary">② 연결</button></form>' +

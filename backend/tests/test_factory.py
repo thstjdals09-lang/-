@@ -354,3 +354,45 @@ def test_restart_requeues_interrupted_tasks(signed_in):
         assert stuck > 0
         assert get_factory(signed_in.app).recover_on_startup(conn)["tasks_requeued"] == stuck
     assert signed_in.post(f"/lines/{line_id}/tick", headers=CSRF).json()["executed"] > 0
+
+
+# Captured from docs/js/engine.js generateIdeas with kind "app".
+APP_FIXTURE = [["Generator", 83.1, 85, 83], ["Simulator", 82.5, 85, 89], ["Dashboard", 79.5, 66, 78], ["Planner", 78.5, 81, 79], ["Trainer", 77.7, 87, 75],
+               ["Tracker", 76.3, 68, 66], ["Calculator", 75.8, 78, 71], ["Organizer", 75.7, 78, 74], ["Editor", 71.7, 69, 78], ["Converter", 71.1, 62, 63]]
+
+
+def test_app_ideation_matches_browser_engine():
+    studio = catalog.studio(config.load().catalog_dir)
+    ideas = generate_ideas("가계부", "자동선택", "Web", studio, "app")
+    assert [[i["type"], i["score"], i["metrics"]["fun"], i["reviews"][0]["score"]] for i in ideas] == APP_FIXTURE
+    assert all(i["family"] == "app" for i in ideas)
+
+
+def test_program_project_builds_a_program_not_a_game(signed_in, settings):
+    assert signed_in.post("/projects", json={"topic": "가계부", "kind": "app"}, headers=CSRF).status_code == 201
+    assert signed_in.post("/projects", json={"topic": "x", "kind": "website"}, headers=CSRF).status_code == 422
+    snap = signed_in.get("/state").json()
+    assert snap["projects"][0]["kind"] == "app"
+    lines = _lines(signed_in)
+    assert lines and all(l["family"] == "app" for l in lines)
+    line_id = lines[0]["id"]
+    assert signed_in.post(f"/lines/{line_id}/run", headers=CSRF).json()["status"] == "awaiting_ceo"
+    user_id = signed_in.get("/auth/me").json()["id"]
+    ws = LineWorkspace(workspace_root(settings.workspace_dir, user_id, line_id))
+    release = ws.read("release/index.html")
+    assert 'data-family="app"' in release and "Score" not in release
+
+
+def test_program_prompts_ask_for_a_tool():
+    from app.factory.ai_ideation import concept_prompt
+    from app.factory.executor import TaskContext, build_prompt
+
+    ctx = TaskContext(line_title="가계부", topic="가계부", game_type="Tracker", family="app", pitch="p", loop=["입력", "요약"], platform="Web",
+                      stage_name="Playable Prototype", stage_summary="s", task_name="핵심 루프 구현", role="Gameplay Programmer", kind="coding",
+                      artifact="src/game.js", game_task=True)
+    request = build_prompt(ctx)
+    assert "software studio" in request.system and "not a game" in request.system
+    assert "# Program deliverable" in request.prompt and "no score, lives" in request.prompt
+    game = build_prompt(TaskContext(**{**ctx.__dict__, "family": "action"}))
+    assert "game studio" in game.system and "# Game deliverable" in game.prompt and "win/lose state" in game.prompt
+    assert '"family": "app"' in concept_prompt("가계부", "자동선택", "Web", "", 5, kind="app").prompt

@@ -12,12 +12,13 @@ function topicForm(app, isEdit) {
   return (
     '<section class="panel intake">' +
     '<div class="eyebrow">' + (isEdit ? "NEW BRIEF" : "BRIEF / THEME INTAKE") + "</div>" +
-    "<h2>" + (isEdit ? "새 주제로 포트폴리오 추가" : "게임 주제만 입력하세요") + "</h2>" +
+    "<h2>" + (isEdit ? "새 주제로 포트폴리오 추가" : "만들 것의 주제만 입력하세요") + "</h2>" +
     '<p class="muted">아이디어 10개 생성 → AI 비평·점수화 → 상위 ' + app.state.settings.autoShortlist + "개 자동 생산라인 → 나머지 Backlog.</p>" +
     '<form id="topicForm" class="form">' +
-    '<input name="topic" required maxlength="60" placeholder="예: 홀덤, 좀비, 타이핑, 카지노 운영" value="">' +
+    '<input name="topic" required maxlength="60" placeholder="예: 홀덤, 좀비, 가계부, 일정 관리, 단위 변환" value="">' +
     '<div class="formRow">' +
-    '<label>장르<select name="genre">' + opt(["자동선택", "Roguelike", "Deckbuilder", "Tycoon", "Tactical", "Survivor", "Puzzle", "Party"], t && t.genre) + "</select></label>" +
+    '<label>만들 것<select name="kind"><option value="game"' + (t && t.kind === "app" ? "" : " selected") + '>게임</option><option value="app"' + (t && t.kind === "app" ? " selected" : "") + ">프로그램 · 앱 · 도구</option></select></label>" +
+    '<label>장르 (게임만)<select name="genre">' + opt(["자동선택", "Roguelike", "Deckbuilder", "Tycoon", "Tactical", "Survivor", "Puzzle", "Party"], t && t.genre) + "</select></label>" +
     '<label>플랫폼<select name="platform">' + opt(["Windows PC", "Web", "Mobile", "Steam PC"], t && t.platform) + "</select></label>" +
     "</div>" +
     '<textarea name="notes" rows="2" placeholder="선택: 분위기, 레퍼런스, 금지사항"></textarea>' +
@@ -86,9 +87,9 @@ export function dashboard(app) {
     const p = state.projects[0];
     html +=
       '<section class="panel brief"><div class="panelHead"><div><div class="eyebrow">ACTIVE BRIEF</div><h2>' + esc(p.topic) + "</h2></div>" +
-      '<div class="actions"><span class="chip">' + esc(p.platform) + '</span><span class="chip">' + esc(p.genre) + '</span><button class="btn small" data-action="new-topic">새 주제</button></div></div>' +
+      '<div class="actions"><span class="chip">' + (p.kind === "app" ? "프로그램" : "게임") + '</span><span class="chip">' + esc(p.platform) + '</span>' + (p.kind === "app" ? "" : '<span class="chip">' + esc(p.genre) + "</span>") + '<button class="btn small" data-action="new-topic">새 주제</button></div></div>' +
       (state.user.mode !== "backend"
-        ? '<p class="notice">프리뷰 모드에는 AI가 연결되어 있지 않습니다. 공정·배정·커밋은 시뮬레이션이고 게임은 기본 템플릿 3종 중 하나로 만들어집니다. AI가 직접 아이디어를 내고 게임을 새로 만드는 것은 백엔드 + AI 연결에서 동작합니다.</p>'
+        ? '<p class="notice">프리뷰 모드에는 AI가 연결되어 있지 않습니다. 공정·배정·커밋은 시뮬레이션이고 결과물은 기본 템플릿 중 하나로 만들어집니다. AI가 직접 아이디어를 내고 게임·프로그램을 새로 만드는 것은 백엔드 + AI 연결에서 동작합니다.</p>'
         : "") +
       (p.status === "ideating" ? '<p class="notice">AI 회의 진행 중: 웹 시장 조사 → 여러 AI의 발상 → 교차 비평 → 반론 → 합의. 몇 분 뒤 아이디어와 생산라인이 나타납니다 (로그에서 진행 상황 확인).</p>' : "") +
       (p.status === "failed" ? '<p class="notice">AI 회의가 중단되었습니다. 로그를 확인한 뒤 새 주제로 다시 시작하세요.</p>' : "") +

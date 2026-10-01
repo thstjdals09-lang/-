@@ -31,6 +31,16 @@ const FAMILY_SPEC = {
     win: "12일 종료 시 목표 크레딧과 평판 달성",
     lose: "에너지·자금 운용 실패로 목표 미달",
   },
+  app: {
+    fantasy: "해야 할 일을 빠르고 정확하게 끝내는 사용자",
+    audience: "이 주제의 일을 반복해서 처리해야 하는 사람",
+    session: "1–5분",
+    controls: ["항목 입력", "완료/수정/삭제", "처음으로 되돌리기"],
+    systems: ["항목 목록과 상태", "진행률 요약", "빈 화면·오류 안내"],
+    progression: "쌓인 기록과 요약으로 다음 작업이 빨라짐",
+    win: "사용자가 하려던 일을 막힘 없이 끝냄",
+    lose: "입력한 내용이 사라지거나 결과를 믿을 수 없음",
+  },
 };
 
 export function gddMarkdown(line, idea) {

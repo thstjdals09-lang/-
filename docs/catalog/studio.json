@@ -40,6 +40,18 @@
     {"type": "Extraction Lite", "family": "action", "pitch": "더 가져갈지 탈출할지를 계속 결정한다.", "loop": ["진입", "탐색", "위험 상승", "전리품", "탈출"], "bias": {"novelty": 7, "fun": 5, "risk": -4}},
     {"type": "Arcade Score", "family": "action", "pitch": "한 가지 핵심 조작과 점수 경쟁에 집중한다.", "loop": ["조작", "콤보", "위험 증가", "기록", "재도전"], "bias": {"cost": 9, "schedule": 9, "scalability": -8}}
   ],
+  "app_patterns": [
+    {"type": "Tracker", "family": "app", "pitch": "기록하고 추이를 한눈에 보는 도구로 만든다.", "loop": ["입력", "기록", "요약", "추이 확인", "내보내기"], "bias": {"coreLoop": 7, "cost": 6, "novelty": -4}},
+    {"type": "Calculator", "family": "app", "pitch": "값을 넣으면 바로 답과 근거를 보여주는 계산기로 만든다.", "loop": ["값 입력", "계산", "결과 비교", "저장", "공유"], "bias": {"cost": 9, "schedule": 9, "scalability": -6}},
+    {"type": "Planner", "family": "app", "pitch": "할 일과 일정을 정리하고 우선순위를 잡아주는 플래너로 만든다.", "loop": ["항목 추가", "분류", "우선순위", "완료 처리", "돌아보기"], "bias": {"market": 6, "coreLoop": 5, "novelty": -5}},
+    {"type": "Dashboard", "family": "app", "pitch": "흩어진 숫자를 모아 상태를 한 화면에 보여주는 대시보드로 만든다.", "loop": ["데이터 입력", "집계", "차트 확인", "필터", "판단"], "bias": {"scalability": 7, "market": 4, "cost": -4}},
+    {"type": "Generator", "family": "app", "pitch": "조건을 고르면 결과물을 만들어 주는 생성기로 만든다.", "loop": ["조건 선택", "생성", "다듬기", "복사", "다시 생성"], "bias": {"fun": 6, "cost": 7, "risk": 3}},
+    {"type": "Editor", "family": "app", "pitch": "내용을 직접 만들고 고치는 편집기로 만든다.", "loop": ["새 문서", "편집", "미리보기", "되돌리기", "내보내기"], "bias": {"scalability": 8, "feasibility": -6, "schedule": -5}},
+    {"type": "Trainer", "family": "app", "pitch": "연습 문제와 피드백으로 실력을 키우는 학습 도구로 만든다.", "loop": ["문제", "답 입력", "채점", "해설", "약점 복습"], "bias": {"fun": 5, "market": 5, "coreLoop": 4}},
+    {"type": "Simulator", "family": "app", "pitch": "조건을 바꿔 가며 결과를 미리 돌려보는 시뮬레이터로 만든다.", "loop": ["조건 설정", "실행", "결과 관찰", "조건 변경", "비교"], "bias": {"novelty": 7, "fun": 4, "feasibility": -4}},
+    {"type": "Converter", "family": "app", "pitch": "한 형식을 다른 형식으로 바꿔 주는 변환 도구로 만든다.", "loop": ["붙여넣기", "옵션 선택", "변환", "검토", "복사"], "bias": {"cost": 9, "schedule": 8, "market": -3}},
+    {"type": "Organizer", "family": "app", "pitch": "자료를 모으고 태그로 찾기 쉽게 정리하는 보관함으로 만든다.", "loop": ["수집", "태그", "검색", "묶기", "꺼내 쓰기"], "bias": {"scalability": 6, "coreLoop": 3, "novelty": -3}}
+  ],
   "stages": [
     {
       "id": "brief", "name": "Brief / Theme Intake", "summary": "주제·플랫폼·제약조건 정리", "scope": "portfolio",

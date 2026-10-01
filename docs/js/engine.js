@@ -137,7 +137,8 @@ export function createState(ctx) {
 export function generateIdeas(project, ctx) {
   const rng = createRng(hashString(project.topic + "|" + project.genre + "|" + project.platform));
   const criteria = ctx.studio.idea_criteria;
-  const ideas = ctx.studio.idea_patterns.map((pattern, i) => {
+  const patterns = project.kind === "app" ? ctx.studio.app_patterns : ctx.studio.idea_patterns;
+  const ideas = patterns.map((pattern, i) => {
     const metrics = {};
     for (const c of criteria) {
       const base = 62 + Math.floor(rng() * 30);
@@ -197,6 +198,7 @@ export function createProject(state, input, ctx) {
     genre: input.genre || "자동선택",
     platform: input.platform || "Windows PC",
     notes: input.notes || "",
+    kind: input.kind === "app" ? "app" : "game",
     createdAt: ctx.now,
     portfolio: [],
   };

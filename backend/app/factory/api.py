@@ -22,6 +22,7 @@ class ProjectCreate(BaseModel):
     genre: str = Field(default="자동선택", max_length=40)
     platform: str = Field(default="Windows PC", max_length=40)
     notes: str = Field(default="", max_length=1000)
+    kind: str = Field(default="game", pattern="^(game|app)$")
 
 
 class SettingsPatch(BaseModel):
@@ -178,7 +179,7 @@ def dashboard(request: Request, user: User = Depends(current_user)) -> dict:
 # ---------------------------------------------------------------- projects / ideas
 
 def _project(r) -> dict:
-    return {"id": r["id"], "topic": r["topic"], "genre": r["genre"], "platform": r["platform"], "notes": r["notes"], "created_at": r["created_at"],
+    return {"id": r["id"], "topic": r["topic"], "genre": r["genre"], "platform": r["platform"], "notes": r["notes"], "kind": r["kind"], "created_at": r["created_at"],
             "status": r["status"], "research": json.loads(r["research"]) if r["research"] else None}
 
 

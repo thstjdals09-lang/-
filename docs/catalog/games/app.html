@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI Factory Program</title>
+<style>
+  :root{color-scheme:dark;--bg:#070b12;--panel:#101827;--line:#29384f;--accent:#7c6cff;--good:#49dc8c;--muted:#93a5bb}
+  *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:20px;background:radial-gradient(circle at 50% 0,#20255a 0,transparent 40%),var(--bg);color:#f6f8fc;font-family:Inter,system-ui,sans-serif}
+  .app{width:min(760px,100%);padding:24px;border:1px solid var(--line);border-radius:20px;background:rgba(13,20,32,.96);box-shadow:0 30px 80px #0008}
+  h1{margin:4px 0 6px;font-size:clamp(24px,5vw,38px)}.sub{margin:0 0 18px;color:var(--muted)}small{color:var(--muted)}
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}.stat{padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}.stat strong{display:block;font-size:20px;margin-top:2px}
+  form{display:flex;gap:8px;margin-bottom:12px}input{flex:1;min-width:0;padding:12px;border:1px solid var(--line);border-radius:12px;background:#0b1220;color:inherit;font:inherit}
+  button{padding:12px 16px;border:0;border-radius:12px;background:#253149;color:inherit;font:inherit;font-weight:600;cursor:pointer}button.primary{background:var(--accent)}
+  ul{list-style:none;margin:0;padding:0;display:grid;gap:8px}li{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+  li.done span{text-decoration:line-through;color:var(--muted)}li span{flex:1;overflow-wrap:anywhere}li button{padding:6px 10px;font-size:13px}
+  .empty{padding:18px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:12px}.foot{display:flex;justify-content:space-between;align-items:center;margin-top:14px;gap:8px}
+  @media(max-width:420px){.stats{grid-template-columns:1fr 1fr 1fr}.app{padding:16px}}
+</style>
+</head>
+<body data-ai-factory-game="v2" data-family="app">
+<main class="app">
+  <small id="mode"></small><h1 id="title"></h1><p class="sub">작업을 적고, 끝낸 것을 표시하며 진행률을 확인하세요.</p>
+  <section class="stats"><div class="stat"><small>전체</small><strong id="total">0</strong></div><div class="stat"><small>완료</small><strong id="done">0</strong></div><div class="stat"><small>진행률</small><strong id="rate">0%</strong></div></section>
+  <form id="form"><input id="text" maxlength="60" placeholder="할 일을 입력하세요" aria-label="새 항목"><button class="primary" type="submit">추가</button></form>
+  <ul id="list"></ul>
+  <div class="foot"><small id="message"></small><button id="reset" type="button">처음으로</button></div>
+</main>
+<script>
+  const APP_TITLE={{TITLE_JSON}}; const TOPIC={{TOPIC_JSON}}; const APP_TYPE={{TYPE_JSON}};
+  const $=id=>document.getElementById(id); let items=[];
+  $("title").textContent=APP_TITLE; $("mode").textContent=TOPIC+" · "+APP_TYPE;
+  function render(){
+    const list=$("list"); list.innerHTML="";
+    if(!items.length){const e=document.createElement("li");e.className="empty";e.textContent="아직 항목이 없습니다. 위에서 추가하세요.";list.appendChild(e)}
+    items.forEach((item,i)=>{
+      const li=document.createElement("li"); if(item.done)li.className="done";
+      const text=document.createElement("span"); text.textContent=item.text;
+      const toggle=document.createElement("button"); toggle.type="button"; toggle.textContent=item.done?"되돌리기":"완료"; toggle.onclick=()=>{item.done=!item.done;render()};
+      const remove=document.createElement("button"); remove.type="button"; remove.textContent="삭제"; remove.onclick=()=>{items.splice(i,1);render()};
+      li.append(text,toggle,remove); list.appendChild(li);
+    });
+    const done=items.filter(i=>i.done).length;
+    $("total").textContent=items.length; $("done").textContent=done; $("rate").textContent=(items.length?Math.round(done/items.length*100):0)+"%";
+    $("message").textContent=items.length&&done===items.length?"모두 끝냈습니다.":"남은 항목 "+(items.length-done)+"개";
+  }
+  function startGame(){ items=[{text:TOPIC+" 목표 정하기",done:true},{text:TOPIC+" 첫 작업 시작",done:false},{text:"결과 확인하고 정리",done:false}]; $("text").value=""; render(); }
+  $("form").addEventListener("submit",e=>{e.preventDefault();const v=$("text").value.trim();if(!v)return;items.push({text:v,done:false});$("text").value="";render()});
+  $("reset").addEventListener("click",startGame);
+  startGame();
+</script>
+</body>
+</html>

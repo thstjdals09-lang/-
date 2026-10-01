@@ -24,7 +24,7 @@ const LIVE_TABS = new Set(["dashboard", "lines", "team", "logs"]);
 const TABS = [
   ["dashboard", "대시보드", "대표 대시보드"],
   ["ideas", "아이디어", "아이디어 포트폴리오"],
-  ["lines", "생산라인", "게임 생산라인"],
+  ["lines", "생산라인", "게임·프로그램 생산라인"],
   ["review", "CEO Review", "CEO Review"],
   ["results", "결과물", "완성 빌드"],
   ["team", "AI 사원", "AI 사원 · 쿼터"],
@@ -447,7 +447,7 @@ const remoteActions = {
   },
   "export-account"() { window.open(api.exportUrl(), "_blank", "noopener"); },
   "github-disconnect"() {
-    if (!confirm("GitHub 연결을 해제할까요? 이후 게임은 배포되지 않습니다.")) return;
+    if (!confirm("GitHub 연결을 해제할까요? 이후 결과물은 배포되지 않습니다.")) return;
     remote(async () => { app.state.account = await api.disconnectGithub(); });
   },
 };
@@ -499,7 +499,7 @@ const remoteForms = {
     const topic = String(fd.get("topic") || "").trim();
     if (!topic) return;
     app.ui.editingTopic = false;
-    remote(() => api.createProject({ topic, genre: fd.get("genre"), platform: fd.get("platform"), notes: fd.get("notes") || "" }));
+    remote(() => api.createProject({ topic, kind: fd.get("kind") === "app" ? "app" : "game", genre: fd.get("genre"), platform: fd.get("platform"), notes: fd.get("notes") || "" }));
   },
   feedback(form) {
     const text = String(new FormData(form).get("text") || "").trim();
@@ -546,7 +546,7 @@ const forms = {
     const fd = new FormData(form);
     const topic = String(fd.get("topic") || "").trim();
     if (!topic) return;
-    const project = createProject(app.state, { topic, genre: fd.get("genre"), platform: fd.get("platform"), notes: fd.get("notes") }, app.ctx);
+    const project = createProject(app.state, { topic, kind: fd.get("kind"), genre: fd.get("genre"), platform: fd.get("platform"), notes: fd.get("notes") }, app.ctx);
     app.ui.editingTopic = false;
     app.ui.projectId = project.id;
     commit();

@@ -48,11 +48,11 @@ def game_family(game_type: str) -> str:
     return "strategy"
 
 
-def generate_ideas(topic: str, genre: str, platform: str, studio: dict) -> list[dict]:
+def generate_ideas(topic: str, genre: str, platform: str, studio: dict, kind: str = "game") -> list[dict]:
     rng = mulberry32(fnv1a(f"{topic}|{genre}|{platform}"))
     criteria = studio["idea_criteria"]
     ideas = []
-    for pattern in studio["idea_patterns"]:
+    for pattern in studio["app_patterns" if kind == "app" else "idea_patterns"]:
         metrics = {}
         for c in criteria:
             base = 62 + math.floor(rng() * 30)

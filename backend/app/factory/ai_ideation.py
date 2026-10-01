@@ -19,6 +19,7 @@ from . import research as market
 from .executor import Attempt
 
 FAMILIES = ("strategy", "action", "management")
+APP_FAMILY = "app"  # programs that are not games (tools, utilities, apps)
 CREATORS = 2  # different AIs inventing concepts (another AI steps in when one answers unusable JSON)
 DEBATE_TOP = 5  # concepts that go through rebuttal + consensus
 
@@ -55,7 +56,34 @@ def _research_block(research_text: str) -> str:
     return f"# Market research (summarised from live web search — use it)\n{research_text}\n\n"
 
 
-def concept_prompt(topic: str, genre: str, platform: str, notes: str, count: int, research_text: str = "", taken: list[str] | None = None) -> ExecuteRequest:
+def app_concept_prompt(topic: str, platform: str, notes: str, count: int, research_text: str = "", taken: list[str] | None = None) -> ExecuteRequest:
+    system = ("You are a Product Lead in a small software studio's ideation room. The product is a program people use to get "
+              "something done (an app, tool or utility) — NOT a game. Invent genuinely different products, not one template "
+              "with different labels. Answer with JSON only.")
+    others = ""
+    if taken:
+        others = ("Others in the room already proposed these — yours must solve the need in a different way:\n"
+                  + "\n".join(f"- {t}" for t in taken) + "\n\n")
+    prompt = (
+        f"Theme from the CEO: {topic}\nPlatform: {platform}\nNotes: {notes or '(none)'}\n\n"
+        f"{_research_block(research_text)}{others}"
+        f"Invent {count} distinct program concepts for this theme. They must differ in who uses them, the job they do and how the "
+        "user works with them (calculator, tracker, planner, editor, generator, converter, dashboard, simulator, trainer, organizer, "
+        "etc. as fits the theme). Use the market research: keep features that work, answer the user pain points, avoid saturated ideas. "
+        "Each must be buildable as a single-file HTML program that runs offline in a browser, with no server and no accounts.\n\n"
+        "Return a JSON array. Each item:\n"
+        '{"title": "Korean product name", "type": "short product label", "family": "app", '
+        '"pitch": "one Korean sentence", "loop": ["4-6 Korean steps of the main user flow"], "mechanics": ["3-5 concrete features"], '
+        '"why_fun": "Korean: why people would keep using it", "market_fit": "Korean: which need/pain point this answers", '
+        '"scope": "what the first usable version must contain"}'
+    )
+    return ExecuteRequest(prompt=prompt, system=system, max_tokens=5000, temperature=0.9)
+
+
+def concept_prompt(topic: str, genre: str, platform: str, notes: str, count: int, research_text: str = "", taken: list[str] | None = None,
+                   kind: str = "game") -> ExecuteRequest:
+    if kind == "app":
+        return app_concept_prompt(topic, platform, notes, count, research_text, taken)
     system = ("You are a Creative Director in an indie game studio's ideation room. "
               "Invent genuinely different games, not reskins of one template. Answer with JSON only.")
     others = ""
@@ -84,12 +112,14 @@ def _listing(concepts: list[dict]) -> str:
                      for i, c in enumerate(concepts))
 
 
-def critique_prompt(role: str, focus: list[str], criteria: list[dict], concepts: list[dict], research_text: str = "") -> ExecuteRequest:
+def critique_prompt(role: str, focus: list[str], criteria: list[dict], concepts: list[dict], research_text: str = "", kind: str = "game") -> ExecuteRequest:
     crit = ", ".join(f"{c['id']} ({c['label']})" for c in criteria)
+    app_note = ("These are programs (apps/tools), not games: read `fun` as how useful and pleasant it is to use, and `coreLoop` "
+                "as how clear the main user flow is. " if kind == "app" else "")
     system = f"You are the studio's {role}. Score concepts honestly from your discipline's point of view; do not inflate. Answer with JSON only."
     prompt = (
         f"{_research_block(research_text)}Concepts:\n{_listing(concepts)}\n\nScore every concept 0-100 on: {crit}. For cost, schedule, feasibility and risk a HIGH score means "
-        f"cheap / fast / easy / safe. Judge market and novelty against the research (a reskin of a saturated idea scores low). Your focus: {', '.join(focus)}.\n"
+        f"cheap / fast / easy / safe. {app_note}Judge market and novelty against the research (a reskin of a saturated idea scores low). Your focus: {', '.join(focus)}.\n"
         'Return JSON: {"scores": [{"idx": 0, "fun": 80, ..., "note": "one Korean sentence: the biggest strength or problem"}]}'
     )
     return ExecuteRequest(prompt=prompt, system=system, max_tokens=4000, temperature=0.3)
@@ -128,7 +158,7 @@ def consensus_prompt(items: list[tuple[int, dict]], research_text: str) -> Execu
     return ExecuteRequest(prompt=prompt, system=system, max_tokens=3000, temperature=0.3)
 
 
-def _normalise(raw) -> list[dict]:
+def _normalise(raw, kind: str = "game") -> list[dict]:
     items = raw if isinstance(raw, list) else (raw or {}).get("concepts") if isinstance(raw, dict) else None
     out, seen = [], set()
     for item in items or []:
@@ -143,7 +173,7 @@ def _normalise(raw) -> list[dict]:
         out.append({
             "title": str(item["title"])[:60],
             "type": str(item.get("type") or "Original")[:40],
-            "family": family if family in FAMILIES else "strategy",
+            "family": APP_FAMILY if kind == "app" else family if family in FAMILIES else "strategy",
             "pitch": str(item.get("pitch") or "")[:300],
             "loop": loop,
             "mechanics": [str(x)[:120] for x in (item.get("mechanics") or [])][:5],
@@ -161,7 +191,7 @@ def _by_idx(rows) -> dict[int, dict]:
 
 
 def ideate(factory, conn, user_id: str, *, topic: str, genre: str, platform: str, notes: str, studio: dict, count: int = 10,
-           research: dict | None = None) -> list[dict] | None:
+           research: dict | None = None, kind: str = "game") -> list[dict] | None:
     """Concepts from several AIs, scores from the reviewer roles, rebuttals and a consensus.
     None when only the simulator is available."""
     policy = factory.user_settings(conn, user_id)["policy"]
@@ -212,13 +242,13 @@ def ideate(factory, conn, user_id: str, *, topic: str, genre: str, platform: str
     tried: set[str] = set()
     while len(creators) < target and len(tried) < len(online):
         taken = [f"{c['title']} ({c['type']}): {c['pitch']}" for c in concepts]
-        got = ask(concept_prompt(topic, genre, platform, notes, per, research_text, taken), "planning", 3, used, exclude=tried)
+        got = ask(concept_prompt(topic, genre, platform, notes, per, research_text, taken, kind), "planning", 3, used, exclude=tried)
         if got is None:
             break
         text, cid, cname = got
         tried.add(cid)
         have = {_key(c["title"]) for c in concepts}
-        found = [c for c in _normalise(_json_block(text)) if _key(c["title"]) not in have]
+        found = [c for c in _normalise(_json_block(text), kind) if _key(c["title"]) not in have]
         if len(found) < 2:
             factory.log(conn, user_id, "IDEATION", f"{cname} 발상 결과를 해석하지 못함 → 다른 AI에게 발상 요청")
             continue
@@ -238,7 +268,7 @@ def ideate(factory, conn, user_id: str, *, topic: str, genre: str, platform: str
     criteria = studio["idea_criteria"]
     sheets: list[tuple[str, str, list[str], dict]] = []  # role, reviewer AI, focus, scores by idx
     for reviewer in studio["idea_reviewers"]:
-        got = ask(critique_prompt(reviewer["role"], reviewer["focus"], criteria, concepts, research_text), "planning", 2, used)
+        got = ask(critique_prompt(reviewer["role"], reviewer["focus"], criteria, concepts, research_text, kind), "planning", 2, used)
         if got is None:
             continue
         text, _, rname = got

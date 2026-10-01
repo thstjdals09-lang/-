@@ -64,7 +64,7 @@ def template_similarity(html: str, catalog_dir: Path) -> float:
     if not lines:
         return 0.0
     best = 0.0
-    for family in ("strategy", "action", "management"):
+    for family in ("strategy", "action", "management", "app"):
         path = catalog_dir / "games" / f"{family}.html"
         if path.exists():
             tpl = {l.strip() for l in path.read_text(encoding="utf-8").splitlines() if len(l.strip()) > 20}

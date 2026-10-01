@@ -86,7 +86,7 @@ export function publicationBlock(line, mode) {
   if (mode !== "backend") {
     return '<p class="muted small">GitHub 배포는 백엔드 모드에서 동작합니다 (프리뷰는 서버·토큰이 없어 게시하지 않음).</p>';
   }
-  if (!pub) return '<p class="muted small">제작 중에는 GitHub에 올리지 않습니다. 중간 빌드는 아래 빌드 목록에서 바로 플레이할 수 있고, 게임이 완성되어 CEO가 릴리즈를 승인하면 GitHub 저장소 생성 → 커밋·푸시 → github.io 플레이 링크가 한 번에 만들어집니다.</p>';
+  if (!pub) return '<p class="muted small">제작 중에는 GitHub에 올리지 않습니다. 중간 빌드는 아래 빌드 목록에서 바로 플레이할 수 있고, 결과물이 완성되어 CEO가 릴리즈를 승인하면 GitHub 저장소 생성 → 커밋·푸시 → github.io 플레이 링크가 한 번에 만들어집니다.</p>';
   const retry = '<button class="btn primary" data-action="publish" data-id="' + esc(line.id) + '">다시 배포</button>';
   const repo = pub.repositoryUrl ? '<a class="btn" href="' + esc(pub.repositoryUrl) + '" target="_blank" rel="noopener">GitHub 저장소 ↗</a>' : "";
   const version = pub.version ? " v" + esc(pub.version) : "";

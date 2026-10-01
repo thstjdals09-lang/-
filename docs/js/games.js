@@ -1,7 +1,7 @@
-// Standalone HTML5 game builds rendered from the shared templates in docs/catalog/games/.
+// Standalone HTML5 builds (games and other programs) rendered from the shared templates in docs/catalog/games/.
 // The backend (backend/app/factory/games.py) renders the same templates with the same tokens.
 
-export const FAMILIES = ["strategy", "action", "management"];
+export const FAMILIES = ["strategy", "action", "management", "app"]; // "app": programs that are not games
 let templates = null;
 
 export function setGameTemplates(map) {

@@ -97,7 +97,7 @@ export function fromSnapshot(snap, prev, ctx) {
     },
     employees,
     searchTools,
-    projects: snap.projects.map((p) => ({ id: p.id, topic: p.topic, genre: p.genre, platform: p.platform, notes: p.notes, createdAt: parseTs(p.created_at), portfolio: [],
+    projects: snap.projects.map((p) => ({ id: p.id, topic: p.topic, genre: p.genre, platform: p.platform, notes: p.notes, kind: p.kind || "game", createdAt: parseTs(p.created_at), portfolio: [],
       status: p.status || "ready", research: p.research || null })),
     ideas: snap.ideas.map((i) => ({ ...i, projectId: i.project_id })),
     lines: snap.lines.map(mapLine),

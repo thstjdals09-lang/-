@@ -122,10 +122,10 @@ class Factory:
 
     # ------------------------------------------------------------------ portfolio
 
-    def create_project(self, conn, user_id, *, topic, genre="자동선택", platform="Windows PC", notes="") -> str:
+    def create_project(self, conn, user_id, *, topic, genre="자동선택", platform="Windows PC", notes="", kind="game") -> str:
         project_id = _id("prj")
-        conn.execute("INSERT INTO projects(id, user_id, topic, genre, platform, notes, status) VALUES (?,?,?,?,?,?,'ideating')",
-                     (project_id, user_id, topic, genre, platform, notes))
+        conn.execute("INSERT INTO projects(id, user_id, topic, genre, platform, notes, kind, status) VALUES (?,?,?,?,?,?,?,'ideating')",
+                     (project_id, user_id, topic, genre, platform, notes, kind))
         if self.background_ideation and any(e.status == "online" for e, _, _ in self.employees(conn, user_id)):
             # research + several AI calls take minutes: longer than a browser request or a tunnel allows
             self.log(conn, user_id, "IDEATION", f"{topic} · AI 회의 시작: 시장 조사 → 발상 → 교차 비평 → 반론 → 합의 (몇 분 걸립니다)")
@@ -155,11 +155,12 @@ class Factory:
         if p is None:
             return
         topic, genre, platform, notes = p["topic"], p["genre"] or "자동선택", p["platform"] or "Web", p["notes"] or ""
-        research = self._research(conn, user_id, topic, genre, platform)
+        kind = p["kind"] or "game"
+        research = self._research(conn, user_id, topic, genre, platform, kind)
         conn.execute("UPDATE projects SET research=? WHERE id=?", (market.to_json(research), project_id))
-        ideas = ai_ideation.ideate(self, conn, user_id, topic=topic, genre=genre, platform=platform, notes=notes, studio=self.studio, research=research)
+        ideas = ai_ideation.ideate(self, conn, user_id, topic=topic, genre=genre, platform=platform, notes=notes, studio=self.studio, research=research, kind=kind)
         if ideas is None:
-            ideas = generate_ideas(topic, genre, platform, self.studio)
+            ideas = generate_ideas(topic, genre, platform, self.studio, kind)
             self.log(conn, user_id, "IDEATION", f"{topic} · 연결된 AI가 없어 오프라인 아이디어 패턴으로 생성 (AI 마켓에서 AI를 연결하면 AI가 직접 발상)")
         if conn.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone() is None:
             return  # deleted while the room was meeting
@@ -194,7 +195,7 @@ class Factory:
                     continue
         return None
 
-    def _research(self, conn, user_id, topic, genre, platform) -> dict | None:
+    def _research(self, conn, user_id, topic, genre, platform, kind="game") -> dict | None:
         """Web search → analyst AI → market brief. None without a search connection."""
         tool = self.search_tool(conn, user_id)
         if tool is None:
@@ -202,14 +203,14 @@ class Factory:
             return None
         row, entry, adapter = tool
         conn.commit()
-        qs, hits, errors = market.gather(adapter, topic, genre)
+        qs, hits, errors = market.gather(adapter, topic, genre, kind=kind)
         conn.execute("UPDATE provider_connections SET quota_used=COALESCE(quota_used,0)+?, last_error=? WHERE id=?",
                      (len(qs), errors[0] if errors and not hits else None, row["id"]))
         if not hits:
             self.log(conn, user_id, "RESEARCH", f"{topic} · {entry['name']} 검색 실패/결과 없음 → AI 지식만으로 발상" + (f" ({errors[0][:120]})" if errors else ""))
             return None
         research = {"provider": entry["name"], "queries": qs, "sources": [h.__dict__ for h in hits], "brief": None, "analyst": None, "at": _iso()}
-        request = market.analyst_prompt(topic, genre, platform, hits)
+        request = market.analyst_prompt(topic, genre, platform, hits, kind)
         try:
             text, analyst = self._ask(conn, user_id, request, kind="planning", difficulty=2)
             research["brief"] = market.parse_brief(ai_ideation._json_block(text), hits)

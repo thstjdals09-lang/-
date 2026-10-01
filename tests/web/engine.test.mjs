@@ -149,3 +149,12 @@ test("deleting a line, an idea and a whole topic", async () => {
   assert.equal(state.projects.length + state.ideas.length + state.lines.length, 0);
   assert.ok(clearLogs(state) > 0 && state.logs.length === 0);
 });
+
+test("a program topic produces program ideas and lines, not games", () => {
+  const { ctx, state } = factory();
+  createProject(state, { topic: "가계부", kind: "app" }, ctx);
+  assert.equal(state.projects[0].kind, "app");
+  assert.equal(state.ideas.length, 10);
+  assert.ok(state.ideas.every((i) => i.family === "app"));
+  assert.ok(state.lines.length && state.lines.every((l) => l.family === "app"));
+});
