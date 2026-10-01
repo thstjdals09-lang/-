@@ -22,10 +22,7 @@ class OpenAICompatibleAdapter(ProviderAdapter):
     def list_models(self) -> list[str]:
         res = self._request("GET", self.base_url + "/models", headers=self._headers())
         self._capture_quota(res)
-        try:
-            data = res.json()
-        except ValueError:
-            return []  # e.g. GitHub Models answers a plain "OK" here; the configured model is used as is
+        data = self._json(res)
         items = data.get("data", data.get("models", [])) if isinstance(data, dict) else data
         return [m.get("id") or m.get("name") for m in items if isinstance(m, dict)]
 
@@ -43,7 +40,7 @@ class OpenAICompatibleAdapter(ProviderAdapter):
         start = self._timer()
         res = self._request("POST", self.base_url + "/chat/completions", headers=self._headers(), json=self._body(model, messages, request))
         self._capture_quota(res)
-        payload = res.json()
+        payload = self._json(res)
         choice = (payload.get("choices") or [{}])[0]
         text = (choice.get("message") or {}).get("content") or choice.get("text") or ""
         return ExecuteResult(text=text, model=payload.get("model", model or ""), usage=self.usage_parser(payload), latency_ms=self._elapsed_ms(start))
@@ -87,7 +84,7 @@ class OpenRouterAdapter(OpenAICompatibleAdapter):
 
     def quota_probe(self) -> QuotaInfo | None:
         res = self._request("GET", self.base_url + "/key", headers=self._headers())
-        data = res.json().get("data", {})
+        data = self._json(res).get("data", {})
         limit = data.get("limit")
         remaining = data.get("limit_remaining")
         if limit is None:

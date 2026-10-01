@@ -33,14 +33,14 @@ class SearchAdapter(ProviderAdapter):
         if self.api == "tavily":
             res = self._request("POST", self.base_url + "/search", headers={"Authorization": f"Bearer {self._secret}"},
                                 json={"query": query, "max_results": n, "search_depth": "basic", "include_answer": False})
-            items = [(r.get("title"), r.get("url"), r.get("content")) for r in res.json().get("results") or []]
+            items = [(r.get("title"), r.get("url"), r.get("content")) for r in self._json(res).get("results") or []]
         elif self.api == "brave":
             res = self._request("GET", self.base_url + "/web/search", headers={"X-Subscription-Token": self._secret, "Accept": "application/json"},
                                 params={"q": query, "count": n})
-            items = [(r.get("title"), r.get("url"), r.get("description")) for r in ((res.json().get("web") or {}).get("results") or [])]
+            items = [(r.get("title"), r.get("url"), r.get("description")) for r in ((self._json(res).get("web") or {}).get("results") or [])]
         elif self.api == "serper":
             res = self._request("POST", self.base_url + "/search", headers={"X-API-KEY": self._secret}, json={"q": query, "num": n})
-            items = [(r.get("title"), r.get("link"), r.get("snippet")) for r in res.json().get("organic") or []]
+            items = [(r.get("title"), r.get("link"), r.get("snippet")) for r in self._json(res).get("organic") or []]
         else:
             raise ProviderError(ErrorInfo("bad_request", False), f"unknown search api {self.api}")
         hits = []

@@ -17,7 +17,7 @@ class AnthropicAdapter(ProviderAdapter):
 
     def list_models(self) -> list[str]:
         res = self._request("GET", self.base_url + "/models", headers=self._headers(), params={"limit": 100})
-        return [m["id"] for m in res.json().get("data") or [] if isinstance(m, dict) and m.get("id")]
+        return [m["id"] for m in self._json(res).get("data") or [] if isinstance(m, dict) and m.get("id")]
 
     def execute(self, request: ExecuteRequest) -> ExecuteResult:
         content: list[dict] | str = request.prompt
@@ -34,7 +34,7 @@ class AnthropicAdapter(ProviderAdapter):
         start = self._timer()
         res = self._request("POST", self.base_url + "/messages", headers=self._headers(), json=body)
         self._capture_quota(res)
-        payload = res.json()
+        payload = self._json(res)
         text = "".join(part.get("text", "") for part in payload.get("content") or [] if part.get("type") == "text")
         return ExecuteResult(text=text, model=payload.get("model", model or ""), usage=self.usage_parser(payload), latency_ms=self._elapsed_ms(start))
 

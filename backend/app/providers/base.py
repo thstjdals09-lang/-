@@ -133,6 +133,15 @@ class ProviderAdapter(ABC):
         self._raise_for(res)
         return res
 
+    def _json(self, res: httpx.Response):
+        """Body of a successful reply. A provider that answers 200 with something that is not JSON
+        (a gateway page, a bare "OK") failed this call: the caller fails over to the next AI."""
+        try:
+            return res.json()
+        except ValueError as exc:
+            body = redact(res.text[:120], self._secret or "")
+            raise ProviderError(ErrorInfo("transient", True, 60), f"{self.adapter_id} unexpected reply (not JSON): {body!r}") from exc
+
     # ---- contract ----
 
     def health_check(self) -> HealthResult:

@@ -19,7 +19,7 @@ class GeminiAdapter(ProviderAdapter):
 
     def list_models(self) -> list[str]:
         res = self._request("GET", self.base_url + "/models", headers=self._headers())
-        return [m["name"].removeprefix("models/") for m in res.json().get("models", []) if "generateContent" in m.get("supportedGenerationMethods", ["generateContent"])]
+        return [m["name"].removeprefix("models/") for m in self._json(res).get("models", []) if "generateContent" in m.get("supportedGenerationMethods", ["generateContent"])]
 
     def execute(self, request: ExecuteRequest) -> ExecuteResult:
         model = request.model or self.model or "gemini-2.5-flash"
@@ -32,7 +32,7 @@ class GeminiAdapter(ProviderAdapter):
             body["systemInstruction"] = {"parts": [{"text": request.system}]}
         start = self._timer()
         res = self._request("POST", f"{self.base_url}/models/{model}:generateContent", headers=self._headers(), json=body)
-        payload = res.json()
+        payload = self._json(res)
         parts = ((payload.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
         text = "".join(p.get("text", "") for p in parts)
         return ExecuteResult(text=text, model=model, usage=self.usage_parser(payload), latency_ms=self._elapsed_ms(start))
