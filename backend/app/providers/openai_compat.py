@@ -22,7 +22,10 @@ class OpenAICompatibleAdapter(ProviderAdapter):
     def list_models(self) -> list[str]:
         res = self._request("GET", self.base_url + "/models", headers=self._headers())
         self._capture_quota(res)
-        data = res.json()
+        try:
+            data = res.json()
+        except ValueError:
+            return []  # e.g. GitHub Models answers a plain "OK" here; the configured model is used as is
         items = data.get("data", data.get("models", [])) if isinstance(data, dict) else data
         return [m.get("id") or m.get("name") for m in items if isinstance(m, dict)]
 

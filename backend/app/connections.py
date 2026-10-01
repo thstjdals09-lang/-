@@ -89,7 +89,7 @@ def verify(conn: sqlite3.Connection, user_id: str, row: sqlite3.Row, entry: dict
     """health_check + quota_probe; updates status, models, quota and last_verified."""
     try:
         adapter = adapter_for(conn, user_id, row, entry, transport)
-    except AdapterUnavailable as exc:
+    except (AdapterUnavailable, ValueError) as exc:  # ValueError: a required setting (e.g. account id) is missing
         conn.execute("UPDATE provider_connections SET status='offline', last_error=? WHERE id=?", (str(exc), row["id"]))
         return
     health = adapter.health_check()
