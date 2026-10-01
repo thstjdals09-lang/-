@@ -176,7 +176,11 @@ function mountThumbs(root) {
     frame.setAttribute("sandbox", "allow-scripts");
     frame.setAttribute("title", line.title + " 미리보기");
     frame.setAttribute("tabindex", "-1");
-    frame.srcdoc = buildGame(line);
+    const build = line.builds[0];
+    // Backend mode shows the build the workers actually produced, never the preview template.
+    if (isRemote() && build && build.id) frame.src = app.state.settings.backendUrl.replace(/\/+$/, "") + "/builds/" + encodeURIComponent(build.id) + "/play";
+    else if (isRemote()) return;
+    else frame.srcdoc = buildGame(line);
     el.appendChild(frame);
   });
 }
@@ -791,7 +795,8 @@ async function boot() {
   }
   const saved = readJson(STATE_KEY);
   app.state = saved && saved.version === STATE_VERSION ? saved : createState(app.ctx);
-  if (!app.state.settings.backendUrl && location.pathname.startsWith("/console")) app.state.settings.backendUrl = location.origin;
+  // The console is served by the backend itself, so a saved address from an earlier tunnel is stale.
+  if (location.pathname.startsWith("/console")) app.state.settings.backendUrl = location.origin;
   app.ui = Object.assign({ tab: "dashboard", lineId: null, marketFilter: "recommended" }, readJson(UI_KEY) || {});
   if (await discoverServer()) return; // navigating to the live server
   await probeServer();
