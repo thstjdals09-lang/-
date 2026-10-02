@@ -499,7 +499,7 @@ const remoteForms = {
     const topic = String(fd.get("topic") || "").trim();
     if (!topic) return;
     app.ui.editingTopic = false;
-    remote(() => api.createProject({ topic, kind: fd.get("kind") === "app" ? "app" : "game", genre: fd.get("genre"), platform: fd.get("platform"), notes: fd.get("notes") || "" }));
+    remote(() => api.createProject({ topic, mode: fd.get("mode") === "portfolio" ? "portfolio" : "direct", kind: fd.get("kind") === "app" ? "app" : "game", genre: fd.get("genre"), platform: fd.get("platform"), notes: fd.get("notes") || "" }));
   },
   feedback(form) {
     const text = String(new FormData(form).get("text") || "").trim();

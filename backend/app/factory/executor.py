@@ -92,7 +92,10 @@ def build_prompt(ctx: TaskContext) -> ExecuteRequest:
         qa_rule = ("\nYou are a gate. Judge strictly against the design dossier and the concept. End with a final line exactly "
                    "`RESULT: PASS` or `RESULT: FAIL` followed by the blocking issues (concrete, actionable).")
     concept = ""
-    if ctx.concept:
+    if ctx.concept and ctx.concept.get("brief"):
+        concept = ("# What the CEO asked for (build exactly this — do not swap it for a different idea, do not drop requested parts)\n"
+                   f"{ctx.concept['brief']}\n\n")
+    elif ctx.concept:
         c = ctx.concept
         concept = ("# Concept (agreed in the ideation room — build this)\n"
                    f"{'Features' if app else 'Mechanics'}: {'; '.join(c.get('mechanics') or [])}\n"
@@ -148,7 +151,8 @@ def _brief(ctx: TaskContext) -> str:
     return (f"# {'Program' if app else 'Game'}\n{ctx.line_title} ({ctx.game_type})\nPitch: {ctx.pitch}\n"
             f"{'Main user flow' if app else 'Core loop'}: {' → '.join(ctx.loop)}\n"
             + (f"{'Features' if app else 'Mechanics'}: {'; '.join(c.get('mechanics') or [])}\n" if c.get("mechanics") else "")
-            + (f"First scope: {c['scope']}\n" if c.get("scope") else ""))
+            + (f"First scope: {c['scope']}\n" if c.get("scope") else "")
+            + (f"\n# What the CEO asked for (the plan and the code must deliver exactly this)\n{c['brief']}\n" if c.get("brief") else ""))
 
 
 def plan_prompt(ctx: TaskContext) -> ExecuteRequest:

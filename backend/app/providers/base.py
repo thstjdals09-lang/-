@@ -64,7 +64,7 @@ class HealthResult:
 
 @dataclass
 class ErrorInfo:
-    kind: str  # rate_limited | auth_error | context_exceeded | transient | quota_exhausted | no_credit | bad_request | unknown
+    kind: str  # rate_limited | auth_error | context_exceeded | transient | quota_exhausted | no_credit | unreachable | bad_request | unknown
     retryable: bool
     cooldown_seconds: float = 0
 
@@ -134,6 +134,9 @@ class ProviderAdapter(ABC):
                 res = client.request(method, url, **kwargs)
         except httpx.TimeoutException as exc:
             raise ProviderError(ErrorInfo("transient", True, 10), f"{self.adapter_id} timeout") from exc
+        except httpx.ConnectError as exc:
+            # nothing is listening (a local AI server that is not running): not worth retrying every task
+            raise ProviderError(ErrorInfo("unreachable", True, 600), f"{self.adapter_id} unreachable: {type(exc).__name__}") from exc
         except httpx.HTTPError as exc:
             raise ProviderError(ErrorInfo("transient", True, 10), f"{self.adapter_id} unreachable: {type(exc).__name__}") from exc
         self._raise_for(res)

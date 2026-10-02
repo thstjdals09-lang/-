@@ -451,3 +451,36 @@ def test_game_task_is_planned_then_reviewed_and_revised_in_place(signed_in, http
     assert seen["plan"] >= 1 and seen["review"] >= 1 and seen["revise"] >= 1
     assert "PLAN" in types and "STATIC CHECK" in types and "REVISION" in types
     assert "GENERATED-BY-MODEL" in signed_in.get(f"/builds/{detail['builds'][0]['id']}/play").text
+
+
+def test_direct_order_builds_exactly_what_was_asked_on_the_fast_track(signed_in, http):
+    _connect(signed_in, http, "groq", "api.groq.com/openai/v1/models", {"data": [{"id": "llama"}]})
+    prompts = []
+
+    def chat(req):
+        prompt = json.loads(req.content)["messages"][-1]["content"]
+        prompts.append(prompt)
+        text = "notes\n" + VALID_GAME if "# Program deliverable" in prompt else "ok\nRESULT: PASS"
+        return httpx.Response(200, json={"choices": [{"message": {"content": text}}]})
+
+    http.add("POST", "chat/completions", chat)
+    order = {"topic": "홀덤 대회 스케줄러", "kind": "app", "mode": "direct", "notes": "블라인드 레벨표와 휴식 시간을 넣으면 종료 시각을 계산"}
+    assert signed_in.post("/projects", json=order, headers=CSRF).status_code == 201
+    snap = signed_in.get("/state").json()
+    assert snap["projects"][0]["mode"] == "direct" and len(snap["ideas"]) == 1
+    lines = _lines(signed_in)
+    assert len(lines) == 1 and lines[0]["track"] == "fast" and lines[0]["title"] == "홀덤 대회 스케줄러" and lines[0]["family"] == "app"
+    line_id = lines[0]["id"]
+    assert signed_in.post(f"/lines/{line_id}/run", headers=CSRF).json()["status"] == "awaiting_ceo"
+    detail = signed_in.get(f"/lines/{line_id}").json()
+    assert [b["version"] for b in detail["builds"]] == ["1.0.0", "0.5.0", "0.1.0"]
+    worked = {k: [t["id"] for t in s["tasks"]] for k, s in detail["stages"].items() if s["tasks"]}
+    assert worked == {"prototype": ["core"], "vertical": ["feature"], "release": ["web"]}
+    deliverables = [p for p in prompts if "# Program deliverable" in p]
+    assert deliverables and all("What the CEO asked for" in p and "종료 시각을 계산" in p for p in deliverables)
+    assert not any(l["type"] in ("IDEATION", "SHORTLIST") for l in signed_in.get("/logs").json())
+    # approval finishes the line: live ops is skipped too
+    review = next(r for r in signed_in.get("/reviews").json() if r["line_id"] == line_id and r["blocking"])
+    signed_in.post(f"/reviews/{review['id']}/approve", headers=CSRF)
+    signed_in.post(f"/lines/{line_id}/run", headers=CSRF)
+    assert signed_in.get(f"/lines/{line_id}").json()["status"] == "complete"

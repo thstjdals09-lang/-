@@ -37,7 +37,14 @@ MAX_RUNTIME_FIXES = 2
 MAX_REWRITES = 2  # from-scratch rewrites by another, stronger AI once fixes are spent
 MAX_WAVE = 6  # parallel tasks per line when enough AIs are connected
 RECENT_MINUTES = 30  # load-balancing window
-COOLDOWN = {"rate_limited": 45, "transient": 10, "unknown": 5}
+COOLDOWN = {"rate_limited": 45, "transient": 10, "unknown": 5, "unreachable": 600}
+STUCK_COOLDOWN = 900  # an AI that keeps answering "rate limited" is rested instead of being asked every task
+STUCK_AFTER = 3
+
+
+def estimate_tokens(request) -> int:
+    """Rough size of a request (Korean and code run about 3 characters per token)."""
+    return (len(request.prompt) + len(request.system or "")) // 3 + 600 * len(request.images or [])
 DEFAULT_USER_SETTINGS = {"policy": "cheapest_viable_quality", "max_parallel": 3, "auto_shortlist": 3, "workers_per_line": 3}
 
 
@@ -123,10 +130,13 @@ class Factory:
 
     # ------------------------------------------------------------------ portfolio
 
-    def create_project(self, conn, user_id, *, topic, genre="자동선택", platform="Windows PC", notes="", kind="game") -> str:
+    def create_project(self, conn, user_id, *, topic, genre="자동선택", platform="Windows PC", notes="", kind="game", mode="portfolio") -> str:
         project_id = _id("prj")
-        conn.execute("INSERT INTO projects(id, user_id, topic, genre, platform, notes, kind, status) VALUES (?,?,?,?,?,?,?,'ideating')",
-                     (project_id, user_id, topic, genre, platform, notes, kind))
+        conn.execute("INSERT INTO projects(id, user_id, topic, genre, platform, notes, kind, mode, status) VALUES (?,?,?,?,?,?,?,?,'ideating')",
+                     (project_id, user_id, topic, genre, platform, notes, kind, mode))
+        if mode == "direct":
+            self._create_direct(conn, user_id, project_id, topic, notes, kind)
+            return project_id
         if self.background_ideation and any(e.status == "online" for e, _, _ in self.employees(conn, user_id)):
             # research + several AI calls take minutes: longer than a browser request or a tunnel allows
             self.log(conn, user_id, "IDEATION", f"{topic} · AI 회의 시작: 시장 조사 → 발상 → 교차 비평 → 반론 → 합의 (몇 분 걸립니다)")
@@ -184,6 +194,22 @@ class Factory:
                 self.create_line(conn, user_id, idea_id, automatic=True)
         conn.execute("UPDATE projects SET status='ready' WHERE id=?", (project_id,))
         self.log(conn, user_id, "SHORTLIST", f"{topic} · 아이디어 {len(ideas)}개 · 상위 {len(eligible)}개 자동 생산라인 · {len(ideas) - len(eligible)}개 Backlog")
+
+    def _create_direct(self, conn, user_id, project_id, topic, notes, kind):
+        """Direct order: no ideation room. One idea that is the CEO's own description, one line on the fast track."""
+        brief = (topic + ("\n" + notes.strip() if notes.strip() else "")).strip()
+        app = kind == "app"
+        idea_id = _id("idea")
+        metrics = {c["id"]: 0 for c in self.studio["idea_criteria"]}
+        loop = ["열기", "입력", "처리", "결과 확인"] if app else ["시작", "조작", "결과", "재도전"]
+        conn.execute(
+            "INSERT INTO ideas(id, project_id, rank, title, type, family, pitch, loop, metrics, reviews, score, status, concept) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (idea_id, project_id, 1, topic[:60], "직접 지시", "app" if app else "action", brief[:300], json.dumps(loop, ensure_ascii=False),
+             json.dumps(metrics), "[]", 0, "shortlisted", json.dumps({"brief": brief, "direct": True, "mechanics": [], "scope": ""}, ensure_ascii=False)),
+        )
+        self.create_line(conn, user_id, idea_id, automatic=True, track="fast")
+        conn.execute("UPDATE projects SET status='ready' WHERE id=?", (project_id,))
+        self.log(conn, user_id, "DIRECT", f"{topic} · 회의 없이 바로 제작: 계획 → 코드 → 검사·검토 → 실행 확인 → CEO 검토")
 
     def search_tool(self, conn, user_id):
         """The account's first online web-search connection as (row, entry, adapter), or None."""
@@ -246,7 +272,7 @@ class Factory:
         self._record_attempts(conn, user_id, None, None, attempts, rtask)
         return text, attempts[-1].name
 
-    def create_line(self, conn, user_id, idea_id, *, automatic=False) -> str:
+    def create_line(self, conn, user_id, idea_id, *, automatic=False, track="full") -> str:
         idea = conn.execute("SELECT i.*, p.topic, p.user_id FROM ideas i JOIN projects p ON p.id=i.project_id WHERE i.id=?", (idea_id,)).fetchone()
         if idea is None or idea["user_id"] != user_id:
             raise KeyError("idea not found")
@@ -256,9 +282,9 @@ class Factory:
         line_id = _id("line")
         first = next(i for i, s in enumerate(self.stages) if s.get("scope") != "portfolio")
         conn.execute(
-            """INSERT INTO production_lines(id, user_id, project_id, idea_id, title, slug, project_slug, family, game_type, stage_index, status, leader_decision)
-               VALUES (?,?,?,?,?,?,?,?,?,?,'running',?)""",
-            (line_id, user_id, idea["project_id"], idea_id, idea["title"], slugify(idea["type"]), slugify(idea["topic"]), idea["family"], idea["type"], first, "생산라인 개설"),
+            """INSERT INTO production_lines(id, user_id, project_id, idea_id, title, slug, project_slug, family, game_type, stage_index, status, leader_decision, track)
+               VALUES (?,?,?,?,?,?,?,?,?,?,'running',?,?)""",
+            (line_id, user_id, idea["project_id"], idea_id, idea["title"], slugify(idea["type"]), slugify(idea["topic"]), idea["family"], idea["type"], first, "생산라인 개설", track),
         )
         for stage in self.stages[:first]:
             conn.execute("INSERT INTO stages(id, line_id, stage_key, status, qa_status, started_at, completed_at) VALUES (?,?,?,?,?,?,?)",
@@ -348,7 +374,15 @@ class Factory:
                 elif a.error_kind == "quota_exhausted":
                     conn.execute("UPDATE provider_connections SET quota_used=COALESCE(quota_limit, quota_used) WHERE id=?", (a.connection_id,))
                 elif a.error_kind in COOLDOWN:
-                    conn.execute("UPDATE provider_connections SET cooldown_until=? WHERE id=?", (_iso(now + timedelta(seconds=COOLDOWN[a.error_kind])), a.connection_id))
+                    seconds = COOLDOWN[a.error_kind]
+                    recent = [r["error_kind"] for r in conn.execute(
+                        "SELECT error_kind FROM usage_logs WHERE connection_id=? ORDER BY id DESC LIMIT ?", (a.connection_id, STUCK_AFTER))]
+                    if a.error_kind == "rate_limited" and len(recent) == STUCK_AFTER and all(k == "rate_limited" for k in recent):
+                        seconds = STUCK_COOLDOWN
+                        self.log(conn, user_id, "RESTING", f"{a.name} · 사용량 제한이 {STUCK_AFTER}번 연속 → {STUCK_COOLDOWN // 60}분 쉬게 하고 다른 AI에 배정", line_id)
+                    elif a.error_kind == "unreachable":
+                        self.log(conn, user_id, "RESTING", f"{a.name} · 서버에 연결할 수 없음(꺼져 있음) → {seconds // 60}분 뒤 다시 확인", line_id)
+                    conn.execute("UPDATE provider_connections SET cooldown_until=? WHERE id=?", (_iso(now + timedelta(seconds=seconds)), a.connection_id))
             else:
                 row = conn.execute("SELECT quota_unit, quota_limit, quota_used, reserve FROM provider_connections WHERE id=?", (a.connection_id,)).fetchone()
                 if row and row["quota_limit"]:
@@ -437,9 +471,14 @@ class Factory:
             except (AdapterUnavailable, vault.VaultError, ValueError):
                 continue
         request = request or build_prompt(ctx)
+        size = estimate_tokens(request)
+        caps = {e.id: row["request_cap"] for e, row, _ in team}
+        fits = [c for c in candidates if not caps.get(c[0]) or size < caps[c[0]]]
+        candidates = fits or candidates
         if candidates:
             first = candidates[0][0]
             self._busy(first, +1)
+            attempts = []
             try:
                 text, attempts = run_with_failover(candidates, request)
                 self._record_attempts(conn, user_id, line_id, task["id"], attempts, rtask)
@@ -447,11 +486,16 @@ class Factory:
                     self.log(conn, user_id, "DEGRADED", f"{task['name']} · 품질 기준 {decision.required:.0f} 미달 AI로 진행", line_id)
                 return text, attempts[-1].connection_id, attempts[-1].name
             except AllProvidersFailed as exc:
+                attempts = exc.attempts
                 self._record_attempts(conn, user_id, line_id, task["id"], exc.attempts, rtask)
                 if not self.simulate:
                     raise
             finally:
                 self._busy(first, -1)
+                for a in attempts:
+                    if a.error_kind == "context_exceeded":
+                        # the provider refused a request of this size (context window or per-minute token limit)
+                        conn.execute("UPDATE provider_connections SET request_cap=MIN(COALESCE(request_cap, ?), ?) WHERE id=?", (size, size, a.connection_id))
         elif not self.simulate:
             raise AllProvidersFailed([])
         return simulate(ctx), SIM_ID, SIM_NAME
@@ -468,6 +512,11 @@ class Factory:
         stage_id = _id("stg")
         conn.execute("INSERT INTO stages(id, line_id, stage_key, status, started_at) VALUES (?,?,?,?,?)", (stage_id, line["id"], stage_def["id"], "in_progress", _iso()))
         ids = {}
+        tasks = stage_def["tasks"]
+        if line["track"] == "fast":
+            keep = {t["id"] for t in tasks if t.get("fast")}
+            tasks = [{**t, "depends": [d for d in t["depends"] if d in keep]} for t in tasks if t["id"] in keep]
+        stage_def = {**stage_def, "tasks": tasks}
         for t in stage_def["tasks"]:
             ids[t["id"]] = _id("tsk")
             conn.execute(
@@ -1028,6 +1077,16 @@ class Factory:
         s = self.user_settings(conn, user_id)
         stage_def = self.stages[line["stage_index"]]
         stage_row = self._stage_row(conn, line_id, stage_def["id"])
+        # fast track: stages without a fast task are passed over (documents, store checks, live ops)
+        while line["track"] == "fast" and stage_row is None and not any(t.get("fast") for t in stage_def["tasks"]):
+            conn.execute("INSERT INTO stages(id, line_id, stage_key, status, qa_status, started_at, completed_at) VALUES (?,?,?,?,?,?,?)",
+                         (_id("stg"), line_id, stage_def["id"], "completed", "skipped", _iso(), _iso()))
+            self._advance(conn, user_id, line)
+            line = conn.execute("SELECT * FROM production_lines WHERE id=?", (line_id,)).fetchone()
+            if line["status"] != "running":
+                return {"status": line["status"], "executed": 0}
+            stage_def = self.stages[line["stage_index"]]
+            stage_row = self._stage_row(conn, line_id, stage_def["id"])
         if stage_row is None:
             stage_row = self._instantiate(conn, line, stage_def)
         self._refresh(conn, stage_row["id"])

@@ -63,7 +63,7 @@ def test_errors_are_classified_and_redacted():
     assert SECRET not in str(err.value)
 
 
-def test_network_failure_is_transient():
+def test_refused_connection_is_unreachable():
     def handler(req):
         raise httpx.ConnectError("refused")
 
@@ -72,7 +72,7 @@ def test_network_failure_is_transient():
     assert not health.ok
     with pytest.raises(ProviderError) as err:
         adapter.list_models()
-    assert err.value.info.kind == "transient"
+    assert err.value.info.kind == "unreachable" and err.value.info.cooldown_seconds >= 300
 
 
 def test_classifier_table():

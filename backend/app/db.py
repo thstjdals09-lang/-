@@ -308,6 +308,12 @@ MIGRATIONS: list[str] = [
     """
     ALTER TABLE projects ADD COLUMN kind TEXT NOT NULL DEFAULT 'game';
     """,
+    # 11 — direct projects build exactly what was asked on a short track (no ideation room, no document stages).
+    """
+    ALTER TABLE projects ADD COLUMN mode TEXT NOT NULL DEFAULT 'portfolio';
+    ALTER TABLE production_lines ADD COLUMN track TEXT NOT NULL DEFAULT 'full';
+    ALTER TABLE provider_connections ADD COLUMN request_cap INTEGER;
+    """,
 ]
 
 

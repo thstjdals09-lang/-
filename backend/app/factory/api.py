@@ -21,8 +21,9 @@ class ProjectCreate(BaseModel):
     topic: str = Field(min_length=1, max_length=60)
     genre: str = Field(default="자동선택", max_length=40)
     platform: str = Field(default="Windows PC", max_length=40)
-    notes: str = Field(default="", max_length=1000)
+    notes: str = Field(default="", max_length=4000)
     kind: str = Field(default="game", pattern="^(game|app)$")
+    mode: str = Field(default="portfolio", pattern="^(portfolio|direct)$")
 
 
 class SettingsPatch(BaseModel):
@@ -88,7 +89,7 @@ def line_summary(f: Factory, conn, line) -> dict:
     stage = f.stages[line["stage_index"]]
     return {
         "id": line["id"], "projectId": line["project_id"], "ideaId": line["idea_id"], "topic": _topic(conn, line["project_id"]),
-        "title": line["title"], "status": line["status"], "family": line["family"], "gameType": line["game_type"],
+        "title": line["title"], "status": line["status"], "family": line["family"], "gameType": line["game_type"], "track": line["track"],
         "stageIndex": line["stage_index"], "stage": stage["id"], "stageName": stage["name"], "progress": _progress(f, conn, line),
         "autopilot": bool(line["autopilot"]), "leader": {"state": line["leader_state"], "lastDecision": line["leader_decision"]},
     }
@@ -179,7 +180,7 @@ def dashboard(request: Request, user: User = Depends(current_user)) -> dict:
 # ---------------------------------------------------------------- projects / ideas
 
 def _project(r) -> dict:
-    return {"id": r["id"], "topic": r["topic"], "genre": r["genre"], "platform": r["platform"], "notes": r["notes"], "kind": r["kind"], "created_at": r["created_at"],
+    return {"id": r["id"], "topic": r["topic"], "genre": r["genre"], "platform": r["platform"], "notes": r["notes"], "kind": r["kind"], "mode": r["mode"], "created_at": r["created_at"],
             "status": r["status"], "research": json.loads(r["research"]) if r["research"] else None}
 
 

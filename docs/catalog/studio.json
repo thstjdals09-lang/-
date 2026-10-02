@@ -92,7 +92,7 @@
       "id": "prototype", "name": "Playable Prototype", "summary": "핵심 재미를 증명하는 최소 플레이 버전", "build": "0.1.0",
       "tasks": [
         {"id": "scaffold", "name": "저장소·빌드 골격", "role": "Build Engineer", "kind": "coding", "difficulty": 1, "depends": [], "artifact": "src/"},
-        {"id": "core", "name": "핵심 루프 구현", "role": "Gameplay Programmer", "kind": "coding", "difficulty": 2, "depends": ["scaffold"], "artifact": "src/game.js", "game": true},
+        {"id": "core", "name": "핵심 루프 구현", "role": "Gameplay Programmer", "kind": "coding", "difficulty": 2, "depends": ["scaffold"], "artifact": "src/game.js", "game": true, "fast": true},
         {"id": "state", "name": "입력·상태 머신", "role": "Systems Programmer", "kind": "coding", "difficulty": 2, "depends": ["scaffold"], "artifact": "src/state.js"},
         {"id": "hud", "name": "임시 UI/HUD", "role": "UI/UX", "kind": "coding", "difficulty": 1, "depends": ["core"], "artifact": "src/hud.js"},
         {"id": "playtest", "name": "프로토타입 플레이테스트", "role": "QA", "kind": "qa", "difficulty": 1, "depends": ["core", "state", "hud"], "artifact": "prototype-findings.md"},
@@ -102,7 +102,7 @@
     {
       "id": "vertical", "name": "Vertical Slice", "summary": "최종 품질에 가까운 대표 구간 제작", "build": "0.5.0",
       "tasks": [
-        {"id": "feature", "name": "대표 구간 기능 완성", "role": "Gameplay Programmer", "kind": "coding", "difficulty": 2, "depends": [], "artifact": "src/slice.js", "game": true},
+        {"id": "feature", "name": "대표 구간 기능 완성", "role": "Gameplay Programmer", "kind": "coding", "difficulty": 2, "depends": [], "artifact": "src/slice.js", "game": true, "fast": true},
         {"id": "artpass", "name": "최종 품질 아트 패스", "role": "Art Director", "kind": "design", "difficulty": 2, "depends": [], "artifact": "assets/slice/"},
         {"id": "ui", "name": "UI 폴리시", "role": "UI/UX", "kind": "design", "difficulty": 2, "depends": ["feature"], "artifact": "src/ui.css"},
         {"id": "build", "name": "슬라이스 통합 빌드", "role": "Build Engineer", "kind": "coding", "difficulty": 1, "depends": ["feature", "artpass", "ui"], "artifact": "vertical-slice.zip"},
@@ -165,7 +165,7 @@
       "id": "release", "name": "Release Build", "summary": "배포파일·버전 태그·릴리즈노트 생성", "build": "1.0.0", "ceo_gate": true,
       "tasks": [
         {"id": "notes", "name": "버전 태그·릴리즈노트", "role": "Release Manager", "kind": "planning", "difficulty": 1, "depends": [], "artifact": "release-notes.md"},
-        {"id": "web", "name": "Web 릴리즈 빌드", "role": "Build Engineer", "kind": "coding", "difficulty": 1, "depends": [], "artifact": "release/index.html"},
+        {"id": "web", "name": "Web 릴리즈 빌드", "role": "Build Engineer", "kind": "coding", "difficulty": 1, "depends": [], "artifact": "release/index.html", "fast": true},
         {"id": "windows", "name": "Windows 패키지", "role": "Build Engineer", "kind": "coding", "difficulty": 2, "depends": ["web"], "artifact": "release/windows.zip"},
         {"id": "smoke", "name": "최종 smoke test", "role": "QA", "kind": "qa", "difficulty": 1, "depends": ["web", "windows"], "artifact": "smoke.json"},
         {"id": "package", "name": "CEO 검토 패키지", "role": "Producer", "kind": "planning", "difficulty": 1, "depends": ["notes", "smoke"], "artifact": "ceo-review.md"}
